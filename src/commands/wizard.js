@@ -3,9 +3,13 @@
 const prompts = require('@clack/prompts');
 const pc = require('picocolors');
 const { runInitCommand } = require('./init');
-const { runPreMigrationEndpoints } = require('./endpoints');
+const {
+  runPreMigrationEndpoints,
+  runPostMigrationEndpoints
+} = require('./endpoints');
 const { runStation1Preparation } = require('./station1');
 const { runStation2Quality } = require('./quality');
+const { runMigrationSummary } = require('./summary');
 const { discoverEndpointSource } = require('../services/endpoints');
 const { JiraClient } = require('../services/jira');
 
@@ -169,6 +173,13 @@ async function runInteractiveWizard({
     promptApi,
     output
   });
+  const station3Result = await runStation3Wizard({
+    microserviceName,
+    currentDirectory,
+    environment,
+    promptApi,
+    output
+  });
 
   promptApi.outro(pc.green('Proceso finalizado.'));
 
@@ -176,7 +187,8 @@ async function runInteractiveWizard({
     ...result,
     ...(baselineResult ? { baseline: baselineResult } : {}),
     ...(station1Result ? { station1: station1Result } : {}),
-    ...(station2Result ? { station2: station2Result } : {})
+    ...(station2Result ? { station2: station2Result } : {}),
+    ...(station3Result ? { station3: station3Result } : {})
   };
 }
 
@@ -368,6 +380,101 @@ async function runStation2QualityWizard({
   }
 }
 
+async function runStation3Wizard({
+  microserviceName,
+  currentDirectory,
+  environment,
+  promptApi,
+  output,
+  runPost = runPostMigrationEndpoints,
+  runSummary = runMigrationSummary,
+  discoverSource = discoverEndpointSource
+}) {
+  const shouldRunPost = await promptApi.confirm({
+    message: 'Deseas ejecutar la validación POST y el análisis de paridad de Estacion 3?',
+    initialValue: false
+  });
+
+  if (isCancelled(shouldRunPost, promptApi) || !shouldRunPost) {
+    return undefined;
+  }
+
+  const discoveredSource = await discoverSource(currentDirectory);
+  let source = discoveredSource?.path;
+  if (!source) {
+    source = await promptApi.text({
+      message: 'Ruta o URL de OpenAPI/Swagger/Postman:',
+      validate: (value) => value?.trim() ? undefined : 'Indica una ruta o URL de definición.'
+    });
+    if (isCancelled(source, promptApi)) {
+      return { mode: 'cancelled' };
+    }
+  }
+
+  const baseUrl = await promptApi.text({
+    message: 'URL base de la API migrada (opcional):',
+    placeholder: 'https://api.example.com'
+  });
+  if (isCancelled(baseUrl, promptApi)) {
+    return { mode: 'cancelled' };
+  }
+
+  let authToken = environment.AUTH_TOKEN;
+  if (!authToken) {
+    authToken = await promptApi.password({
+      message: 'Bearer token OAuth2 (opcional):'
+    });
+    if (isCancelled(authToken, promptApi)) {
+      return { mode: 'cancelled' };
+    }
+  }
+
+  const confirmed = await promptApi.confirm({
+    message: 'Confirmas ejecutar pruebas GET POST y comparar contra la baseline PRE?',
+    initialValue: true
+  });
+  if (isCancelled(confirmed, promptApi) || !confirmed) {
+    return { mode: 'cancelled' };
+  }
+
+  const spinner = promptApi.spinner();
+  const postResult = await runPost(microserviceName, {
+    source,
+    baseUrl: baseUrl || undefined,
+    authToken: authToken || undefined,
+    currentDirectory,
+    output,
+    progress: {
+      onDiscovery: ({ total }) => spinner.start(`Preparando ${total} endpoints GET POST...`),
+      onEndpointStart: ({ index, total, endpoint }) =>
+        spinner.start(`Probando POST ${index}/${total}: ${endpoint.endpoint}`),
+      onEndpointComplete: ({ index, total, result }) =>
+        spinner.stop(`POST ${index}/${total}: ${result.status ?? 'ERROR'} (${result.responseTimeMs} ms)`)
+    }
+  });
+
+  const shouldCreateSummary = await promptApi.confirm({
+    message: 'Deseas generar ahora el resumen maestro de migración?',
+    initialValue: true
+  });
+  if (isCancelled(shouldCreateSummary, promptApi) || !shouldCreateSummary) {
+    return { post: postResult };
+  }
+
+  spinner.start('Consolidando evidencia de migración...');
+  try {
+    const summary = await runSummary(microserviceName, {
+      currentDirectory,
+      output
+    });
+    spinner.stop('Resumen maestro generado.');
+    return { post: postResult, summary };
+  } catch (error) {
+    spinner.stop('No se pudo generar el resumen maestro.');
+    throw error;
+  }
+}
+
 function createProgressHandlers(spinner) {
   return {
     onParentStart: () => spinner.start('Conectando con Jira y creando tarea padre...'),
@@ -401,5 +508,6 @@ module.exports = {
   runInteractiveWizard,
   runStation1PreparationWizard,
   runStation2QualityWizard,
+  runStation3Wizard,
   validateMicroserviceSlug
 };

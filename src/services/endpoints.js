@@ -377,15 +377,31 @@ function createPayloadSnippet(payload, limit = 500) {
 }
 
 function createBaselineReport(microserviceName, results, timestamp = new Date()) {
+  return createEndpointReport('PRE', microserviceName, results, timestamp);
+}
+
+function createPostMigrationReport(microserviceName, results, timestamp = new Date()) {
+  return createEndpointReport('POST', microserviceName, results, timestamp);
+}
+
+function createEndpointReport(phase, microserviceName, results, timestamp = new Date()) {
   return {
     timestamp: timestamp.toISOString(),
     microservice: microserviceName,
-    phase: 'PRE',
+    phase,
     results
   };
 }
 
-async function writeBaselineReport(report, {
+async function writeBaselineReport(report, options = {}) {
+  return writeEndpointReport(report, options);
+}
+
+async function writePostMigrationReport(report, options = {}) {
+  return writeEndpointReport(report, options);
+}
+
+async function writeEndpointReport(report, {
   currentDirectory = process.cwd(),
   fileSystem = { mkdir, writeFile }
 } = {}) {
@@ -398,7 +414,10 @@ async function writeBaselineReport(report, {
     'history',
     directoryName
   );
-  const reportPath = path.join(historyDirectory, 'endpoints-pre.json');
+  const reportPath = path.join(
+    historyDirectory,
+    report.phase === 'POST' ? 'endpoints-post.json' : 'endpoints-pre.json'
+  );
 
   await fileSystem.mkdir(historyDirectory, { recursive: true });
   await fileSystem.writeFile(
@@ -424,12 +443,16 @@ function summarizeResults(results) {
 module.exports = {
   EndpointSourceError,
   createBaselineReport,
+  createEndpointReport,
   createPayloadSnippet,
+  createPostMigrationReport,
   discoverEndpointSource,
   executeGetEndpoints,
   extractGetEndpoints,
   loadEndpointDefinition,
   parseDefinition,
   summarizeResults,
-  writeBaselineReport
+  writeBaselineReport,
+  writeEndpointReport,
+  writePostMigrationReport
 };

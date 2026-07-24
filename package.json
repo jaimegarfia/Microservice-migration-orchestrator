@@ -13,7 +13,7 @@
   },
   "scripts": {
     "start": "node bin/migration-cli.js",
-    "lint": "node --check bin/migration-cli.js && node --check src/index.js && node --check src/commands/init.js && node --check src/commands/endpoints.js && node --check src/commands/station1.js && node --check src/commands/quality.js && node --check src/commands/wizard.js && node --check src/services/endpoints.js && node --check src/services/readme.js && node --check src/services/versioning.js && node --check src/services/quality.js && node --check src/services/jira.js && node --check src/utils/checklist.js",
+    "lint": "node --check bin/migration-cli.js && node --check src/index.js && node --check src/commands/init.js && node --check src/commands/endpoints.js && node --check src/commands/station1.js && node --check src/commands/quality.js && node --check src/commands/summary.js && node --check src/commands/wizard.js && node --check src/services/endpoints.js && node --check src/services/parity.js && node --check src/services/readme.js && node --check src/services/summary.js && node --check src/services/versioning.js && node --check src/services/quality.js && node --check src/services/jira.js && node --check src/utils/checklist.js",
     "test": "node --test"
   },
   "keywords": [

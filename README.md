@@ -106,6 +106,51 @@ El informe contiene el timestamp, microservicio, fase `PRE`, estado HTTP, tiempo
 
 Tras inicializar tareas desde el wizard, se ofrece automaticamente ejecutar esta baseline como siguiente paso.
 
+## Estación 3: Paridad API y reporte maestro
+
+### Validación POST
+
+Después de desplegar el microservicio migrado, vuelve a ejecutar exclusivamente los endpoints `GET` contra su URL migrada:
+
+```bash
+migration-cli endpoints --post auth-service --source docs/openapi.yaml --base-url https://api-migrada.example.com
+```
+
+El comando busca automáticamente el `endpoints-pre.json` más reciente del mismo microservicio, guarda:
+
+```text
+.axetrules/history/<timestamp>/endpoints-post.json
+.axetrules/history/<timestamp>/parity-report.md
+```
+
+y clasifica cada endpoint:
+
+| Resultado | Criterio |
+| --- | --- |
+| 🟢 `MATCH` | Mismo status HTTP y mismo hash de respuesta |
+| 🟡 `WARNING` | Mismo status con payload diferente, variación de tiempo superior al 50% o endpoint nuevo |
+| 🔴 `BREAKING CHANGE` | Status HTTP distinto o endpoint no disponible tras la migración |
+
+El reporte de paridad incluye la tabla comparativa de status, tiempos y motivo, con estado global `PASSED`, `WARNING` o `FAILED`.
+
+### Resumen maestro
+
+Consolida la evidencia más reciente disponible de las estaciones de migración:
+
+```bash
+migration-cli summary auth-service ./auth-service
+```
+
+La ruta del microservicio es opcional y se usa para comprobar README y archivos de versión. El comando busca PRE, POST, paridad y calidad incluso si se crearon en timestamps distintos, y escribe:
+
+```text
+.axetrules/history/<timestamp>/migration-summary.md
+```
+
+El panel global marca `FAILED` si falla cobertura, Sonar o paridad; `WARNING` si falta evidencia o configuración; y `PASSED` cuando todas las estaciones evaluadas cumplen.
+
+El wizard ofrece ejecutar Estación 3 y, tras completar la paridad, generar este resumen maestro en la terminal.
+
 ## Estación 1: Versionado y README técnico
 
 ### Versionado
@@ -231,4 +276,4 @@ npm run lint
 npm test
 ```
 
-Los comandos validan sintaxis y ejecutan las pruebas automatizadas de Jira, baseline de endpoints, versionado, README técnico, JaCoCo, SonarQube y wizard.
+Los comandos validan sintaxis y ejecutan las pruebas automatizadas de Jira, baseline PRE/POST, paridad de API, resumen maestro, versionado, README técnico, JaCoCo, SonarQube y wizard.

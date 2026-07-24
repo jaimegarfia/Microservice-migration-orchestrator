@@ -1,7 +1,10 @@
 'use strict';
 
 const { runInitCommand } = require('./commands/init');
-const { runPreMigrationEndpoints } = require('./commands/endpoints');
+const {
+  runPreMigrationEndpoints,
+  runPostMigrationEndpoints
+} = require('./commands/endpoints');
 const {
   runReadmeCommand,
   runStation1Preparation,
@@ -11,6 +14,7 @@ const {
   runInteractiveWizard,
   validateMicroserviceSlug
 } = require('./commands/wizard');
+const { runMigrationSummary } = require('./commands/summary');
 const {
   analyzeMicroservice,
   generateProjectReadme
@@ -31,11 +35,26 @@ const {
 } = require('./services/quality');
 const {
   EndpointSourceError,
+  createPostMigrationReport,
   discoverEndpointSource,
   executeGetEndpoints,
   extractGetEndpoints,
-  loadEndpointDefinition
+  loadEndpointDefinition,
+  writePostMigrationReport
 } = require('./services/endpoints');
+const {
+  PARITY_STATUS,
+  ParityError,
+  compareEndpointResults,
+  createParityReport,
+  findLatestPreReport
+} = require('./services/parity');
+const {
+  SummaryError,
+  assessMigration,
+  collectMigrationEvidence,
+  renderMigrationSummary
+} = require('./services/summary');
 const {
   VersioningError,
   bumpProjectVersion,
@@ -54,16 +73,24 @@ const {
 
 module.exports = {
   EndpointSourceError,
+  ParityError,
+  SummaryError,
   JiraClient,
   QualityAnalysisError,
   VersioningError,
   JiraConfigurationError,
   JiraRequestError,
+  PARITY_STATUS,
   STANDARD_SUBTASKS,
   analyzeCoverage,
+  assessMigration,
   analyzeMicroservice,
   buildMigrationChecklist,
   calculateCoverageGate,
+  collectMigrationEvidence,
+  compareEndpointResults,
+  createParityReport,
+  createPostMigrationReport,
   bumpProjectVersion,
   bumpVersion,
   discoverEndpointSource,
@@ -71,13 +98,17 @@ module.exports = {
   executeGetEndpoints,
   extractGetEndpoints,
   fetchSonarMetrics,
+  findLatestPreReport,
   generateProjectReadme,
   loadEndpointDefinition,
   parseJacocoReport,
   rankCoveragePriorities,
+  renderMigrationSummary,
   runCoverageCommand,
   runInitCommand,
+  runPostMigrationEndpoints,
   runPreMigrationEndpoints,
+  runMigrationSummary,
   runReadmeCommand,
   runSonarCommand,
   runStation1Preparation,
@@ -85,5 +116,6 @@ module.exports = {
   runVersionCommand,
   runInteractiveWizard,
   toHistoryFileName,
-  validateMicroserviceSlug
+  validateMicroserviceSlug,
+  writePostMigrationReport
 };

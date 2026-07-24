@@ -3,7 +3,10 @@
 
 const { Command } = require('commander');
 const { runInitCommand } = require('../src/commands/init');
-const { runPreMigrationEndpoints } = require('../src/commands/endpoints');
+const {
+  runPreMigrationEndpoints,
+  runPostMigrationEndpoints
+} = require('../src/commands/endpoints');
 const {
   runReadmeCommand,
   runVersionCommand
@@ -12,6 +15,7 @@ const {
   runCoverageCommand,
   runSonarCommand
 } = require('../src/commands/quality');
+const { runMigrationSummary } = require('../src/commands/summary');
 const { runInteractiveWizard } = require('../src/commands/wizard');
 const { JiraRequestError } = require('../src/services/jira');
 
@@ -41,20 +45,24 @@ program
 
 program
   .command('endpoints [microserviceName]')
-  .description('Ejecuta pruebas de endpoints y guarda una evidencia de baseline.')
-  .requiredOption('--pre', 'Ejecuta la baseline previa a la migracion.')
+  .description('Ejecuta pruebas GET de endpoints PRE o POST y guarda evidencia.')
+  .option('--pre', 'Ejecuta la baseline previa a la migracion.')
+  .option('--post', 'Ejecuta la validacion posterior y compara contra PRE.')
   .option('--source <rutaOUrl>', 'Ruta o URL de una definicion OpenAPI/Postman.')
   .option('--base-url <url>', 'URL base para OpenAPI sin servidor o Postman relativo.')
   .option('--auth-token <token>', 'Bearer token; se recomienda usar AUTH_TOKEN.')
   .option('--timeout <milisegundos>', 'Timeout por endpoint.', Number)
   .action(async (microserviceName, options) => {
-    if (!microserviceName) {
+    if (!microserviceName || (!options.pre && !options.post) || (options.pre && options.post)) {
       throw new Error(
-        'Indica el microservicio: migration-cli endpoints --pre <microserviceName>.'
+        'Uso: migration-cli endpoints --pre|--post <microserviceName>.'
       );
     }
 
-    await runPreMigrationEndpoints(microserviceName, {
+    const runEndpoints = options.post
+      ? runPostMigrationEndpoints
+      : runPreMigrationEndpoints;
+    await runEndpoints(microserviceName, {
       source: options.source,
       baseUrl: options.baseUrl,
       authToken: options.authToken || process.env.AUTH_TOKEN,
@@ -89,6 +97,15 @@ program
   .description('Consulta métricas de SonarQube y evalúa el Quality Gate.')
   .action(async (microservicePath) => {
     await runSonarCommand(microservicePath || process.cwd());
+  });
+
+program
+  .command('summary <microserviceName> [microservicePath]')
+  .description('Consolida la evidencia y genera el reporte maestro de migración.')
+  .action(async (microserviceName, microservicePath) => {
+    await runMigrationSummary(microserviceName, {
+      microservicePath: microservicePath || process.cwd()
+    });
   });
 
 program.parseAsync(process.argv).catch((error) => {

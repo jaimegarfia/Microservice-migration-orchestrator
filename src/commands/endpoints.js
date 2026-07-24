@@ -4,13 +4,21 @@ const pc = require('picocolors');
 const {
   EndpointSourceError,
   createBaselineReport,
+  createPostMigrationReport,
   discoverEndpointSource,
   executeGetEndpoints,
   extractGetEndpoints,
   loadEndpointDefinition,
   summarizeResults,
-  writeBaselineReport
+  writeBaselineReport,
+  writePostMigrationReport
 } = require('../services/endpoints');
+const {
+  compareEndpointResults,
+  createParityReport,
+  findLatestPreReport,
+  writeParityReport
+} = require('../services/parity');
 const { validateMicroserviceName } = require('../utils/checklist');
 
 async function runPreMigrationEndpoints(microserviceName, {
@@ -63,6 +71,74 @@ async function runPreMigrationEndpoints(microserviceName, {
   };
 }
 
+async function runPostMigrationEndpoints(microserviceName, options = {}) {
+  const {
+    source,
+    baseUrl,
+    authToken = process.env.AUTH_TOKEN,
+    currentDirectory = process.cwd(),
+    output = console.log,
+    fetchImplementation = globalThis.fetch,
+    progress = {},
+    timeoutMs,
+    findPreReport = findLatestPreReport,
+    writePostReport = writePostMigrationReport,
+    writeParity = writeParityReport
+  } = options;
+  const serviceName = validateMicroserviceName(microserviceName);
+  const resolvedSource = await resolveEndpointSource(source, currentDirectory);
+  const { definition } = await loadEndpointDefinition(resolvedSource, {
+    fetchImplementation
+  });
+  const endpoints = extractGetEndpoints(definition, { baseUrl });
+
+  if (!endpoints.length) {
+    throw new EndpointSourceError(
+      'No se encontraron endpoints GET ejecutables en la definicion indicada.'
+    );
+  }
+
+  const { report: preReport, reportPath: preReportPath } = await findPreReport(
+    serviceName,
+    { currentDirectory }
+  );
+  progress.onDiscovery?.({
+    source: resolvedSource,
+    total: endpoints.length,
+    phase: 'POST'
+  });
+
+  const results = await executeGetEndpoints(endpoints, {
+    authToken,
+    fetchImplementation,
+    timeoutMs,
+    onEndpointStart: progress.onEndpointStart,
+    onEndpointComplete: progress.onEndpointComplete
+  });
+  const postReport = createPostMigrationReport(serviceName, results);
+  const postReportPath = await writePostReport(postReport, { currentDirectory });
+  const comparisons = compareEndpointResults(preReport.results, results);
+  const parityReport = createParityReport({
+    microservice: serviceName,
+    preReport,
+    postReport,
+    comparisons
+  });
+  const parityReportPath = await writeParity(parityReport, { currentDirectory });
+
+  printPostMigrationSummary(parityReport, postReportPath, parityReportPath, output);
+
+  return {
+    source: resolvedSource,
+    endpoints,
+    preReportPath,
+    postReport,
+    postReportPath,
+    parityReport,
+    parityReportPath
+  };
+}
+
 async function resolveEndpointSource(source, currentDirectory) {
   if (source?.trim()) {
     return source.trim();
@@ -76,6 +152,23 @@ async function resolveEndpointSource(source, currentDirectory) {
   }
 
   return discoveredSource.path;
+}
+
+function printPostMigrationSummary(parityReport, postReportPath, parityReportPath, output) {
+  const summary = parityReport.summary;
+  const title = summary.status === 'PASSED'
+    ? pc.green('Paridad POST completada: PASSED')
+    : summary.status === 'WARNING'
+      ? pc.yellow('Paridad POST completada: WARNING')
+      : pc.red('Paridad POST completada: FAILED');
+
+  output('');
+  output(pc.bold(title));
+  output(
+    `${pc.green(`${summary.matches} MATCH`)} · ${pc.yellow(`${summary.warnings} WARNING`)} · ${pc.red(`${summary.breakingChanges} BREAKING CHANGE`)}`
+  );
+  output(`Evidencia POST: ${postReportPath}`);
+  output(`Reporte de paridad: ${parityReportPath}`);
 }
 
 function printBaselineSummary(summary, reportPath, output) {
@@ -99,6 +192,8 @@ function printBaselineSummary(summary, reportPath, output) {
 
 module.exports = {
   printBaselineSummary,
+  printPostMigrationSummary,
   resolveEndpointSource,
+  runPostMigrationEndpoints,
   runPreMigrationEndpoints
 };

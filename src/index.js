@@ -16,6 +16,20 @@ const {
   generateProjectReadme
 } = require('./services/readme');
 const {
+  runCoverageCommand,
+  runSonarCommand,
+  runStation2Quality
+} = require('./commands/quality');
+const {
+  QualityAnalysisError,
+  analyzeCoverage,
+  calculateCoverageGate,
+  evaluateSonarQualityGate,
+  fetchSonarMetrics,
+  parseJacocoReport,
+  rankCoveragePriorities
+} = require('./services/quality');
+const {
   EndpointSourceError,
   discoverEndpointSource,
   executeGetEndpoints,
@@ -41,23 +55,33 @@ const {
 module.exports = {
   EndpointSourceError,
   JiraClient,
+  QualityAnalysisError,
   VersioningError,
   JiraConfigurationError,
   JiraRequestError,
   STANDARD_SUBTASKS,
+  analyzeCoverage,
   analyzeMicroservice,
   buildMigrationChecklist,
+  calculateCoverageGate,
   bumpProjectVersion,
   bumpVersion,
   discoverEndpointSource,
+  evaluateSonarQualityGate,
   executeGetEndpoints,
   extractGetEndpoints,
+  fetchSonarMetrics,
   generateProjectReadme,
   loadEndpointDefinition,
+  parseJacocoReport,
+  rankCoveragePriorities,
+  runCoverageCommand,
   runInitCommand,
   runPreMigrationEndpoints,
   runReadmeCommand,
+  runSonarCommand,
   runStation1Preparation,
+  runStation2Quality,
   runVersionCommand,
   runInteractiveWizard,
   toHistoryFileName,

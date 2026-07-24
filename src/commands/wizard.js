@@ -5,6 +5,7 @@ const pc = require('picocolors');
 const { runInitCommand } = require('./init');
 const { runPreMigrationEndpoints } = require('./endpoints');
 const { runStation1Preparation } = require('./station1');
+const { runStation2Quality } = require('./quality');
 const { discoverEndpointSource } = require('../services/endpoints');
 const { JiraClient } = require('../services/jira');
 
@@ -162,13 +163,20 @@ async function runInteractiveWizard({
     promptApi,
     output
   });
+  const station2Result = await runStation2QualityWizard({
+    currentDirectory,
+    environment,
+    promptApi,
+    output
+  });
 
   promptApi.outro(pc.green('Proceso finalizado.'));
 
   return {
     ...result,
     ...(baselineResult ? { baseline: baselineResult } : {}),
-    ...(station1Result ? { station1: station1Result } : {})
+    ...(station1Result ? { station1: station1Result } : {}),
+    ...(station2Result ? { station2: station2Result } : {})
   };
 }
 
@@ -303,6 +311,63 @@ async function runStation1PreparationWizard({
   }
 }
 
+async function runStation2QualityWizard({
+  currentDirectory,
+  environment,
+  promptApi,
+  output,
+  runQuality = runStation2Quality
+}) {
+  const shouldAnalyze = await promptApi.confirm({
+    message: 'Deseas ejecutar el análisis de calidad de la Estacion 2?',
+    initialValue: false
+  });
+
+  if (isCancelled(shouldAnalyze, promptApi) || !shouldAnalyze) {
+    return undefined;
+  }
+
+  const projectDirectory = await promptApi.text({
+    message: 'Ruta del microservicio:',
+    initialValue: currentDirectory,
+    validate: (value) => value?.trim() ? undefined : 'Indica una ruta de proyecto.'
+  });
+
+  if (isCancelled(projectDirectory, promptApi)) {
+    return { mode: 'cancelled' };
+  }
+
+  const confirmed = await promptApi.confirm({
+    message: 'Confirmas ejecutar tests JaCoCo y consultar SonarQube si está configurado?',
+    initialValue: true
+  });
+
+  if (isCancelled(confirmed, promptApi) || !confirmed) {
+    return { mode: 'cancelled' };
+  }
+
+  const spinner = promptApi.spinner();
+  spinner.start('Ejecutando cobertura JaCoCo y análisis SonarQube...');
+
+  try {
+    const result = await runQuality(projectDirectory.trim(), {
+      currentDirectory,
+      environment,
+      output,
+      progress: {
+        onBuildStart: ({ buildTool }) =>
+          spinner.start(`Ejecutando tests y JaCoCo con ${buildTool}...`),
+        onSonarStart: () => spinner.start('Consultando métricas de SonarQube...')
+      }
+    });
+    spinner.stop('Análisis de calidad de Estacion 2 completado.');
+    return result;
+  } catch (error) {
+    spinner.stop('No se pudo completar el análisis de Estacion 2.');
+    throw error;
+  }
+}
+
 function createProgressHandlers(spinner) {
   return {
     onParentStart: () => spinner.start('Conectando con Jira y creando tarea padre...'),
@@ -335,5 +400,6 @@ module.exports = {
   runEndpointsBaselineWizard,
   runInteractiveWizard,
   runStation1PreparationWizard,
+  runStation2QualityWizard,
   validateMicroserviceSlug
 };

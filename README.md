@@ -149,6 +149,58 @@ El contenido generado incluye descripción, stack, endpoints, entidades, configu
 
 Tras la inicialización y la baseline opcional, el wizard ofrece preparar la Estación 1. Solicita la ruta, tipo de bump y una confirmación explícita antes de modificar archivos.
 
+## Estación 2: Cobertura y Calidad
+
+### Cobertura JaCoCo
+
+Ejecuta las pruebas y genera el informe JaCoCo mediante Maven o Gradle:
+
+```bash
+migration-cli coverage ./auth-service
+```
+
+El comando detecta:
+
+- Maven: ejecuta `mvn test jacoco:report` y busca `target/site/jacoco/jacoco.xml`.
+- Gradle: ejecuta `gradle test jacocoTestReport` y busca `build/reports/jacoco/test/jacocoTestReport.xml`.
+
+Muestra la cobertura global de líneas y ramas, valida el Quality Gate de líneas (mínimo **60%**) y ordena las cinco clases prioritarias según líneas sin cubrir y complejidad.
+
+### SonarQube
+
+Configura el proyecto en `sonar-project.properties` y, para consultar la API de SonarQube, exporta las credenciales:
+
+```bash
+SONAR_HOST_URL=https://sonar.example.com
+SONAR_TOKEN=<token>
+```
+
+Después ejecuta:
+
+```bash
+migration-cli sonar ./auth-service
+```
+
+El comando obtiene `sonar.projectKey` y evalúa los umbrales de producción:
+
+| Métrica | Objetivo |
+| --- | --- |
+| Code Smells | `< 30` |
+| Bugs | `0` |
+| Hotspots de seguridad | `0` |
+
+Si faltan configuración, token o clave de proyecto, el comando muestra un estado no configurado y genera la evidencia sin realizar llamadas remotas. El token se usa exclusivamente en la cabecera `Authorization` y no se persiste.
+
+### Evidencia consolidada
+
+Cada ejecución de `coverage` o `sonar` guarda un informe en:
+
+```text
+.axetrules/history/<timestamp>/station2-quality.json
+```
+
+El informe contiene el detalle global y por clase de JaCoCo cuando se ejecuta cobertura, junto con las métricas y Quality Gate de Sonar cuando están disponibles. El wizard también ofrece ejecutar el análisis integrado de Estación 2 después de Estación 1, con confirmación explícita antes de lanzar pruebas o consultar SonarQube.
+
 ## Configuracion de Jira
 
 Copia `.env.example` a un archivo de entorno seguro o exporta las variables:
@@ -179,4 +231,4 @@ npm run lint
 npm test
 ```
 
-Los comandos validan sintaxis y ejecutan las pruebas automatizadas de Jira, baseline de endpoints, versionado, README técnico y wizard.
+Los comandos validan sintaxis y ejecutan las pruebas automatizadas de Jira, baseline de endpoints, versionado, README técnico, JaCoCo, SonarQube y wizard.

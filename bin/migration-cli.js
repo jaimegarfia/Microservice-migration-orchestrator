@@ -8,6 +8,10 @@ const {
   runReadmeCommand,
   runVersionCommand
 } = require('../src/commands/station1');
+const {
+  runCoverageCommand,
+  runSonarCommand
+} = require('../src/commands/quality');
 const { runInteractiveWizard } = require('../src/commands/wizard');
 const { JiraRequestError } = require('../src/services/jira');
 
@@ -71,6 +75,20 @@ program
   .description('Genera o actualiza el README técnico del microservicio.')
   .action(async (microservicePath) => {
     await runReadmeCommand(microservicePath || process.cwd());
+  });
+
+program
+  .command('coverage [microservicePath]')
+  .description('Ejecuta JaCoCo, evalúa cobertura y genera evidencia de Estación 2.')
+  .action(async (microservicePath) => {
+    await runCoverageCommand(microservicePath || process.cwd());
+  });
+
+program
+  .command('sonar [microservicePath]')
+  .description('Consulta métricas de SonarQube y evalúa el Quality Gate.')
+  .action(async (microservicePath) => {
+    await runSonarCommand(microservicePath || process.cwd());
   });
 
 program.parseAsync(process.argv).catch((error) => {

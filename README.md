@@ -1,161 +1,149 @@
 # Microservice Migration Orchestrator
 
-CLI autonomo para orquestar tareas de migracion de microservicios, pruebas de endpoints y controles de calidad.
+[![npm](https://img.shields.io/npm/v/microservice-migration-orchestrator.svg)](https://www.npmjs.com/package/microservice-migration-orchestrator)
+[![Node.js](https://img.shields.io/node/v/microservice-migration-orchestrator.svg)](https://nodejs.org/)
+[![Licencia MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE)
 
-## Requisitos
+CLI en Node.js para orquestar una migración de microservicio mediante una **línea de producción por estaciones**. Centraliza la creación de tareas, evidencia de endpoints, versionado, documentación técnica, controles de calidad y el reporte final de migración.
 
-- Node.js 18 o superior.
-- Acceso a Jira, solo para crear incidencias remotas.
+> El CLI realiza peticiones HTTP de lectura (`GET`) para validar endpoints. Las operaciones que modifican archivos o crean incidencias de Jira requieren una confirmación explícita en el asistente interactivo.
 
-## Instalacion
+## Contenido
+
+- [Requisitos e instalación](#requisitos-e-instalación)
+- [Inicio rápido](#inicio-rápido)
+- [Línea de producción por estaciones](#línea-de-producción-por-estaciones)
+- [Comandos CLI](#comandos-cli)
+- [Motor de paridad API](#motor-de-paridad-api)
+- [Variables de entorno](#variables-de-entorno)
+- [Artefactos y evidencia](#artefactos-y-evidencia)
+- [Asistente interactivo](#asistente-interactivo)
+- [Desarrollo](#desarrollo)
+- [Seguridad](#seguridad)
+
+## Requisitos e instalación
+
+- Node.js **18** o superior.
+- Acceso al microservicio y a su definición OpenAPI/Swagger o colección Postman para las estaciones de endpoints.
+- Acceso a Jira únicamente si se crearán incidencias remotas.
+- Maven o Gradle únicamente para ejecutar cobertura JaCoCo.
+- Acceso a SonarQube únicamente para consultar métricas de calidad.
+
+### Ejecutar sin instalación
+
+Usa `npx` para ejecutar la última versión publicada:
 
 ```bash
-npm install
+npx microservice-migration-orchestrator --help
 ```
 
-Para ejecutar el binario desde este repositorio:
+El binario instalado se denomina `migration-cli`, por lo que también puedes invocarlo explícitamente:
 
 ```bash
+npx --package microservice-migration-orchestrator migration-cli --help
+```
+
+### Instalación global
+
+```bash
+npm install --global microservice-migration-orchestrator
+
+migration-cli --help
+```
+
+### Desarrollo local
+
+```bash
+git clone https://github.com/jaimegarfia/Microservice-migration-orchestrator.git
+cd Microservice-migration-orchestrator
+npm install
+npm test
 npm start
 ```
 
-Despues de publicar o enlazar el paquete con npm, el ejecutable es:
+## Inicio rápido
+
+Este ejemplo ejecuta las estaciones principales para `auth-service`:
 
 ```bash
-migration-cli
-```
-
-## Asistente interactivo (Estacion 1)
-
-El comando sin argumentos inicia un wizard guiado:
-
-```bash
-migration-cli
-```
-
-Tambien se inicia si se omite el nombre en `init`:
-
-```bash
-migration-cli init
-```
-
-El asistente:
-
-1. Solicita un nombre de microservicio en formato slug, por ejemplo `auth-service`.
-2. Detecta si Jira esta configurado.
-3. Si Jira no esta configurado, permite seleccionar `Jira` o `Local Markdown`.
-4. Muestra un resumen y solicita confirmacion.
-5. Muestra spinners durante la creacion y un panel final con enlaces o la ruta del archivo generado.
-
-Si se selecciona Jira sin configuracion completa, el wizard no realiza cambios y muestra las variables que deben configurarse.
-
-## Ejecucion no interactiva
-
-La forma no interactiva se conserva para scripts y CI/CD:
-
-```bash
+# Estación 0: crea tareas en Jira o un checklist Markdown local.
 migration-cli init auth-service
-```
 
-Con Jira configurado, crea una tarea padre y ocho subtareas mediante `POST /rest/api/2/issue`. Sin Jira, genera e imprime el checklist Markdown y guarda una copia en:
-
-```text
-.axetrules/history/jira-tasks-auth-service.md
-```
-
-## Baseline PRE de endpoints
-
-El comando no interactivo ejecuta exclusivamente operaciones `GET`, registra una evidencia previa a la migracion y no modifica datos remotos:
-
-```bash
-migration-cli endpoints --pre auth-service
-```
-
-La fuente se detecta automaticamente, en este orden:
-
-1. `swagger.*` u `openapi.*` en la raiz.
-2. `docs/swagger.*` o `docs/openapi.*`.
-3. El primer archivo JSON de `postman/`.
-
-Tambien puedes proporcionar una definicion manual local o remota:
-
-```bash
+# Estación 0: toma la baseline de la API antes de migrar.
 migration-cli endpoints --pre auth-service --source docs/openapi.yaml
-migration-cli endpoints --pre auth-service --source https://api.example.com/openapi.json
-```
 
-Para documentos sin servidor definido o URLs relativas de Postman, indica la URL base:
+# Estación 1: incrementa versión y genera documentación técnica.
+migration-cli version --bump patch ./auth-service
+migration-cli readme ./auth-service
 
-```bash
-migration-cli endpoints --pre auth-service --source postman/collection.json --base-url https://api.example.com
-```
+# Estación 2: genera JaCoCo y consulta SonarQube si está configurado.
+migration-cli coverage ./auth-service
+migration-cli sonar ./auth-service
 
-El token opcional se toma de `AUTH_TOKEN` o de `--auth-token`. En el asistente se solicita como campo oculto cuando no existe `AUTH_TOKEN`.
+# Estación 3: prueba la API migrada y compara con PRE.
+migration-cli endpoints --post auth-service \
+  --source docs/openapi.yaml \
+  --base-url https://api-migrada.example.com
 
-```bash
-AUTH_TOKEN=<token> migration-cli endpoints --pre auth-service
-```
-
-Cada ejecucion guarda la evidencia en:
-
-```text
-.axetrules/history/<timestamp>/endpoints-pre.json
-```
-
-El informe contiene el timestamp, microservicio, fase `PRE`, estado HTTP, tiempo de respuesta, hash SHA-256 y un snippet limitado de cada respuesta. Los tokens nunca se escriben en este archivo. `.axetrules/history/` esta ignorado por Git para evitar publicar evidencia local.
-
-Tras inicializar tareas desde el wizard, se ofrece automaticamente ejecutar esta baseline como siguiente paso.
-
-## Estación 3: Paridad API y reporte maestro
-
-### Validación POST
-
-Después de desplegar el microservicio migrado, vuelve a ejecutar exclusivamente los endpoints `GET` contra su URL migrada:
-
-```bash
-migration-cli endpoints --post auth-service --source docs/openapi.yaml --base-url https://api-migrada.example.com
-```
-
-El comando busca automáticamente el `endpoints-pre.json` más reciente del mismo microservicio, guarda:
-
-```text
-.axetrules/history/<timestamp>/endpoints-post.json
-.axetrules/history/<timestamp>/parity-report.md
-```
-
-y clasifica cada endpoint:
-
-| Resultado | Criterio |
-| --- | --- |
-| 🟢 `MATCH` | Mismo status HTTP y mismo hash de respuesta |
-| 🟡 `WARNING` | Mismo status con payload diferente, variación de tiempo superior al 50% o endpoint nuevo |
-| 🔴 `BREAKING CHANGE` | Status HTTP distinto o endpoint no disponible tras la migración |
-
-El reporte de paridad incluye la tabla comparativa de status, tiempos y motivo, con estado global `PASSED`, `WARNING` o `FAILED`.
-
-### Resumen maestro
-
-Consolida la evidencia más reciente disponible de las estaciones de migración:
-
-```bash
+# Consolida la evidencia de todas las estaciones.
 migration-cli summary auth-service ./auth-service
 ```
 
-La ruta del microservicio es opcional y se usa para comprobar README y archivos de versión. El comando busca PRE, POST, paridad y calidad incluso si se crearon en timestamps distintos, y escribe:
+Ejecuta `migration-cli <comando> --help` para consultar ejemplos, flags y variables de entorno específicas de cada comando.
+
+## Línea de producción por estaciones
+
+| Estación | Objetivo | Comandos |
+| --- | --- | --- |
+| **0 — Preparación** | Crear las tareas de migración y preservar el contrato de API previo. | `init`, `endpoints --pre` |
+| **1 — Migración** | Versionar el microservicio y producir su README técnico. | `version`, `readme` |
+| **2 — Calidad** | Evaluar cobertura JaCoCo y métricas de SonarQube. | `coverage`, `sonar` |
+| **3 — Paridad** | Probar la API migrada, comparar PRE/POST y consolidar el resultado. | `endpoints --post`, `summary` |
+| **4 — Entrega** | Desplegar en CUA/PRO y tramitar CAB. | Evidencia y proceso operativo externo |
+
+### Estación 0 — Preparación
+
+`init` crea una tarea padre llamada `Migración Microservicio: <nombre>` y las ocho subtareas estándar:
+
+1. `[Estación 0] Pruebas endpoints pre-migración`
+2. `[Estación 1] Tareas pre-migración y migración`
+3. `[Estación 1] Post-migración y generación de README`
+4. `[Estación 2] Aumentar cobertura de tests (>60%)`
+5. `[Estación 2] Corrección de Code Smells y Bugs (Sonar)`
+6. `[Estación 3] Despliegue DEV y Superar Prisma`
+7. `[Estación 3] Pruebas endpoints post-migración`
+8. `[Estación 4] Despliegue CUA / PRO y documentación CAB`
+
+Con Jira configurado, las crea mediante `POST /rest/api/2/issue`. Sin configuración Jira, genera el checklist local:
 
 ```text
-.axetrules/history/<timestamp>/migration-summary.md
+.axetrules/history/jira-tasks-<microservicio>.md
 ```
 
-El panel global marca `FAILED` si falla cobertura, Sonar o paridad; `WARNING` si falta evidencia o configuración; y `PASSED` cuando todas las estaciones evaluadas cumplen.
+La baseline PRE ejecuta únicamente endpoints `GET`, conserva status, tiempo de respuesta, hash SHA-256 y un fragmento limitado de payload:
 
-El wizard ofrece ejecutar Estación 3 y, tras completar la paridad, generar este resumen maestro en la terminal.
+```bash
+migration-cli endpoints --pre auth-service --source docs/openapi.yaml
+```
 
-## Estación 1: Versionado y README técnico
+La fuente de endpoints se detecta automáticamente en este orden:
 
-### Versionado
+1. `swagger.*` u `openapi.*` en la raíz.
+2. `docs/swagger.*` o `docs/openapi.*`.
+3. El primer JSON de `postman/`.
 
-Actualiza de forma consistente las versiones declaradas en `pom.xml`, `gradle.properties`, `build.gradle`, `build.gradle.kts` y/o `sonar-project.properties`:
+También puede indicarse manualmente:
+
+```bash
+migration-cli endpoints --pre auth-service \
+  --source postman/collection.json \
+  --base-url https://api.example.com \
+  --timeout 15000
+```
+
+### Estación 1 — Versionado y README técnico
+
+Incrementa versiones consistentes en `pom.xml`, `gradle.properties`, `build.gradle`, `build.gradle.kts` y/o `sonar-project.properties`:
 
 ```bash
 migration-cli version --bump patch ./auth-service
@@ -163,117 +151,257 @@ migration-cli version --bump minor ./auth-service
 migration-cli version --bump snapshot ./auth-service
 ```
 
-Tipos de incremento:
-
-| Tipo | Ejemplo |
+| Tipo | Resultado |
 | --- | --- |
 | `patch` | `1.0.0` → `1.0.1` |
 | `minor` | `1.0.0` → `1.1.0` |
 | `snapshot` | `1.0.0` → `1.0.1-SNAPSHOT` |
 
-La ruta es opcional y por defecto se usa el directorio actual. El comando rechaza versiones incompatibles o divergentes entre los archivos detectados antes de escribir cambios.
-
-### README técnico
-
-Genera o actualiza un README técnico en la raíz del microservicio:
+Genera o actualiza el README técnico del microservicio:
 
 ```bash
 migration-cli readme ./auth-service
 ```
 
-El análisis detecta, cuando existen:
+El generador detecta, cuando están presentes, tecnologías Java/Kotlin, Spring Boot, Maven/Gradle, controladores REST, entidades JPA, configuración, persistencia y mensajería. La sección gestionada usa marcadores `migration-cli:readme`, preservando el contenido manual fuera de ellos.
 
-- Java/Kotlin, Spring Boot y Maven/Gradle.
-- Controladores REST y mappings HTTP.
-- Entidades JPA y tablas.
-- Variables de entorno de archivos `.properties`, `.yml` y `.yaml`.
-- Persistencia JPA/Hibernate, MongoDB o R2DBC.
-- Kafka y RabbitMQ.
+### Estación 2 — Cobertura y calidad
 
-El contenido generado incluye descripción, stack, endpoints, entidades, configuración e instrucciones de compilación y despliegue. Se delimita entre marcadores `migration-cli:readme`, por lo que las secciones manuales fuera de esos marcadores se conservan en ejecuciones posteriores.
-
-Tras la inicialización y la baseline opcional, el wizard ofrece preparar la Estación 1. Solicita la ruta, tipo de bump y una confirmación explícita antes de modificar archivos.
-
-## Estación 2: Cobertura y Calidad
-
-### Cobertura JaCoCo
-
-Ejecuta las pruebas y genera el informe JaCoCo mediante Maven o Gradle:
+Ejecuta tests y genera/analiza JaCoCo:
 
 ```bash
 migration-cli coverage ./auth-service
 ```
 
-El comando detecta:
+- Maven: `mvn test jacoco:report`, con informe en `target/site/jacoco/jacoco.xml`.
+- Gradle: `gradle test jacocoTestReport`, con informe en `build/reports/jacoco/test/jacocoTestReport.xml`.
+- Quality Gate de cobertura de líneas: **60%** mínimo.
+- Muestra las clases prioritarias para elevar cobertura según líneas sin cubrir y complejidad.
 
-- Maven: ejecuta `mvn test jacoco:report` y busca `target/site/jacoco/jacoco.xml`.
-- Gradle: ejecuta `gradle test jacocoTestReport` y busca `build/reports/jacoco/test/jacocoTestReport.xml`.
-
-Muestra la cobertura global de líneas y ramas, valida el Quality Gate de líneas (mínimo **60%**) y ordena las cinco clases prioritarias según líneas sin cubrir y complejidad.
-
-### SonarQube
-
-Configura el proyecto en `sonar-project.properties` y, para consultar la API de SonarQube, exporta las credenciales:
+Consulta las métricas de SonarQube:
 
 ```bash
-SONAR_HOST_URL=https://sonar.example.com
-SONAR_TOKEN=<token>
-```
-
-Después ejecuta:
-
-```bash
+SONAR_HOST_URL=https://sonar.example.com \
+SONAR_TOKEN=<token> \
 migration-cli sonar ./auth-service
 ```
 
-El comando obtiene `sonar.projectKey` y evalúa los umbrales de producción:
+La clave del proyecto debe estar declarada como `sonar.projectKey` en `sonar-project.properties`.
 
-| Métrica | Objetivo |
+| Métrica | Umbral |
 | --- | --- |
-| Code Smells | `< 30` |
-| Bugs | `0` |
-| Hotspots de seguridad | `0` |
+| Code Smells | Menos de 30 |
+| Bugs | 0 |
+| Hotspots de seguridad | 0 |
 
-Si faltan configuración, token o clave de proyecto, el comando muestra un estado no configurado y genera la evidencia sin realizar llamadas remotas. El token se usa exclusivamente en la cabecera `Authorization` y no se persiste.
+Sin credenciales o configuración de SonarQube, el comando genera evidencia con estado `not-configured` sin realizar llamadas remotas.
 
-### Evidencia consolidada
+### Estación 3 — Paridad API y resumen maestro
 
-Cada ejecución de `coverage` o `sonar` guarda un informe en:
+Ejecuta la API migrada y la compara contra el baseline PRE más reciente del mismo microservicio:
+
+```bash
+migration-cli endpoints --post auth-service \
+  --source docs/openapi.yaml \
+  --base-url https://api-migrada.example.com
+```
+
+Después consolida la evidencia:
+
+```bash
+migration-cli summary auth-service ./auth-service
+```
+
+El segundo argumento de `summary` es opcional; permite indicar la ruta del microservicio para verificar README y archivos de versión.
+
+## Comandos CLI
+
+| Comando | Descripción |
+| --- | --- |
+| `migration-cli` | Inicia el asistente interactivo. |
+| `migration-cli init [microserviceName]` | Crea tareas Jira o checklist local. Sin argumento inicia el asistente. |
+| `migration-cli endpoints --pre <microserviceName>` | Captura la baseline de endpoints GET previa. |
+| `migration-cli endpoints --post <microserviceName>` | Ejecuta GET tras migración y analiza paridad. |
+| `migration-cli version --bump <tipo> [microservicePath]` | Actualiza versiones de build y Sonar. |
+| `migration-cli readme [microservicePath]` | Genera README técnico del microservicio. |
+| `migration-cli coverage [microservicePath]` | Ejecuta JaCoCo y evalúa cobertura. |
+| `migration-cli sonar [microservicePath]` | Consulta SonarQube y evalúa su Quality Gate. |
+| `migration-cli summary <microserviceName> [microservicePath]` | Genera el reporte maestro. |
+
+### Ayuda integrada
+
+Todos los comandos incluyen ayuda contextual:
+
+```bash
+migration-cli --help
+migration-cli endpoints --help
+migration-cli version --help
+migration-cli sonar --help
+```
+
+La ayuda muestra uso, argumentos, flags, ejemplos, archivos producidos y variables de entorno relevantes.
+
+### Flags de `endpoints`
+
+| Flag | Uso |
+| --- | --- |
+| `--pre` | Genera evidencia previa a migración. |
+| `--post` | Ejecuta la comparación posterior contra el último PRE. |
+| `--source <rutaOUrl>` | Definición OpenAPI, Swagger o colección Postman local/remota. |
+| `--base-url <url>` | URL base si la definición no declara servidor o usa URLs relativas. |
+| `--auth-token <token>` | Token Bearer para endpoints; tiene prioridad sobre `AUTH_TOKEN`. |
+| `--timeout <milisegundos>` | Timeout por endpoint. |
+
+Debe proporcionarse una y sólo una fase: `--pre` o `--post`.
+
+## Motor de paridad API
+
+El motor de Estación 3 compara endpoint por endpoint los artefactos `endpoints-pre.json` y `endpoints-post.json`.
+
+Para cada respuesta se almacena:
+
+- ruta del endpoint;
+- status HTTP;
+- tiempo de respuesta en milisegundos;
+- `responseHash`: SHA-256 del payload de texto;
+- fragmento de payload limitado;
+- error, cuando la petición no se puede completar.
+
+### Estados de comparación
+
+| Estado | Criterio |
+| --- | --- |
+| 🟢 **MATCH** | Mismo status HTTP y mismo `responseHash`. |
+| 🟡 **WARNING** | Mismo status con hash distinto, latencia que varía más de 50%, o endpoint nuevo. |
+| 🔴 **BREAKING CHANGE** | Cambio de status HTTP o endpoint no disponible tras la migración. |
+
+El resultado se escribe en `parity-report.md` con una tabla de status PRE/POST, tiempos y motivo. El estado global es:
+
+- `PASSED`: todos los endpoints son `MATCH`.
+- `WARNING`: no hay cambios rompientes, pero existe alguna advertencia.
+- `FAILED`: existe al menos un `BREAKING CHANGE`.
+
+> El hash compara el payload textual recibido. Si el endpoint devuelve campos dinámicos (fechas, UUIDs, tokens o trazas), puede producir un `WARNING` aunque el contrato funcional siga siendo compatible.
+
+## Variables de entorno
+
+Copia el archivo de ejemplo y completa sólo las variables necesarias:
+
+```bash
+cp .env.example .env
+```
+
+> El CLI no carga automáticamente archivos `.env`; exporta las variables desde tu shell, tu herramienta de secretos o el entorno de CI/CD.
+
+### Jira
+
+| Variable | Requerida | Descripción |
+| --- | --- | --- |
+| `JIRA_HOST` | Sí, para Jira | URL base de Jira, sin `/rest/api/2`. |
+| `JIRA_PROJECT_KEY` | Sí, para Jira | Clave del proyecto destino. |
+| `JIRA_AUTH_BASIC` | Una autenticación | Cabecera Basic codificada en Base64, con o sin prefijo `Basic `. |
+| `JIRA_API_TOKEN` | Una autenticación | Token Bearer si la instancia Jira lo acepta. |
+| `JIRA_ISSUE_TYPE` | No | Tipo de tarea padre; por defecto `Task`. |
+| `JIRA_SUBTASK_ISSUE_TYPE` | No | Tipo de subtarea; por defecto `Sub-task`. |
+
+Ejemplo:
+
+```bash
+export JIRA_HOST=https://jira.example.com
+export JIRA_PROJECT_KEY=MYPROJ
+export JIRA_AUTH_BASIC='Basic <credenciales-base64>'
+
+migration-cli init auth-service
+```
+
+### Endpoints
+
+| Variable | Descripción |
+| --- | --- |
+| `AUTH_TOKEN` | Token OAuth2/Bearer opcional para solicitudes GET. `--auth-token` tiene prioridad. |
+
+El token se envía sólo en la cabecera `Authorization`; nunca se persiste en la evidencia.
+
+### SonarQube
+
+| Variable | Descripción |
+| --- | --- |
+| `SONAR_HOST_URL` | URL base de la instancia SonarQube. |
+| `SONAR_TOKEN` | Token Bearer para consultar la API de SonarQube. |
+
+Además se requiere `sonar.projectKey` en `sonar-project.properties`. El token no se escribe en los reportes.
+
+## Artefactos y evidencia
+
+Toda la evidencia local se guarda bajo `.axetrules/history/`, directorio excluido por `.gitignore`:
 
 ```text
-.axetrules/history/<timestamp>/station2-quality.json
+.axetrules/
+└── history/
+    ├── jira-tasks-auth-service.md
+    └── <timestamp>/
+        ├── endpoints-pre.json
+        ├── endpoints-post.json
+        ├── parity-report.md
+        ├── station2-quality.json
+        └── migration-summary.md
 ```
 
-El informe contiene el detalle global y por clase de JaCoCo cuando se ejecuta cobertura, junto con las métricas y Quality Gate de Sonar cuando están disponibles. El wizard también ofrece ejecutar el análisis integrado de Estación 2 después de Estación 1, con confirmación explícita antes de lanzar pruebas o consultar SonarQube.
+| Artefacto | Productor | Contenido |
+| --- | --- | --- |
+| `jira-tasks-<servicio>.md` | `init` sin Jira | Tarea padre y checklist de subtareas. |
+| `endpoints-pre.json` | `endpoints --pre` | Baseline de endpoints GET antes de migrar. |
+| `endpoints-post.json` | `endpoints --post` | Resultados GET sobre la API migrada. |
+| `parity-report.md` | `endpoints --post` | Comparativa PRE/POST y resultado de paridad. |
+| `station2-quality.json` | `coverage` / `sonar` | Cobertura JaCoCo, Sonar y Quality Gates. |
+| `migration-summary.md` | `summary` | Panel consolidado de las estaciones. |
 
-## Configuracion de Jira
+`summary` localiza los artefactos más recientes para cada tipo, aunque se hayan generado en timestamps distintos.
 
-Copia `.env.example` a un archivo de entorno seguro o exporta las variables:
+## Asistente interactivo
+
+Ejecuta sin argumentos:
 
 ```bash
-JIRA_HOST=https://jira.example.com
-JIRA_PROJECT_KEY=MYPROJ
-JIRA_AUTH_BASIC=Basic <credenciales-en-base64>
+migration-cli
 ```
 
-Como alternativa, si la instancia acepta autenticacion Bearer:
+El wizard guía el proceso:
+
+1. solicita un nombre de microservicio con formato `kebab-case`;
+2. detecta configuración Jira y permite elegir Jira o Markdown local;
+3. confirma la creación de tareas;
+4. ofrece ejecutar baseline PRE;
+5. ofrece Estación 1 (versionado y README);
+6. ofrece Estación 2 (cobertura y SonarQube);
+7. ofrece Estación 3 (POST, paridad y reporte maestro).
+
+Usa confirmaciones explícitas antes de crear incidencias, modificar versiones, generar documentación o lanzar análisis.
+
+## Desarrollo
 
 ```bash
-JIRA_API_TOKEN=<token>
-```
-
-Para ejecutar en modo Jira se requieren `JIRA_HOST`, `JIRA_PROJECT_KEY` y una de las dos opciones de autenticacion. Los tipos de incidencia pueden personalizarse:
-
-```bash
-JIRA_ISSUE_TYPE=Task
-JIRA_SUBTASK_ISSUE_TYPE=Sub-task
-```
-
-## Validacion
-
-```bash
+npm install
 npm run lint
 npm test
 ```
 
-Los comandos validan sintaxis y ejecutan las pruebas automatizadas de Jira, baseline PRE/POST, paridad de API, resumen maestro, versionado, README técnico, JaCoCo, SonarQube y wizard.
+Los tests cubren integración de Jira, extracción y ejecución de endpoints, paridad PRE/POST, resumen maestro, versionado, generación de README, calidad JaCoCo/SonarQube y wizard.
+
+Para probar el empaquetado antes de publicar:
+
+```bash
+npm pack --dry-run
+```
+
+## Seguridad
+
+- Los comandos de endpoints ejecutan sólo `GET`.
+- Los tokens Jira, OAuth2 y SonarQube se usan en cabeceras HTTP y no se guardan en reportes.
+- No incluyas `.env`, credenciales, archivos de evidencia o artefactos de calidad en el repositorio.
+- Revisa los cambios de `version` y `readme` antes de subirlos a la rama del microservicio.
+- Usa secretos de CI/CD o un gestor de secretos para las credenciales de producción.
+
+## Licencia
+
+[MIT](LICENSE).

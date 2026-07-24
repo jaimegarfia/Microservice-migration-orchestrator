@@ -1,0 +1,32 @@
+{
+  "name": "microservice-migration-orchestrator",
+  "version": "0.1.0",
+  "description": "CLI to orchestrate end-to-end microservice migration workflows.",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "bin": {
+    "migration-cli": "./bin/migration-cli.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node bin/migration-cli.js",
+    "lint": "node --check bin/migration-cli.js && node --check src/index.js && node --check src/commands/init.js && node --check src/commands/endpoints.js && node --check src/commands/wizard.js && node --check src/services/endpoints.js && node --check src/services/jira.js && node --check src/utils/checklist.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "cli",
+    "jira",
+    "microservices",
+    "migration",
+    "automation"
+  ],
+  "dependencies": {
+    "@clack/prompts": "^0.10.0",
+    "commander": "^13.1.0",
+    "picocolors": "^1.1.1",
+    "yaml": "^2.5.1"
+  }
+}

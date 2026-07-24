@@ -17,8 +17,12 @@ const {
   runSonarCommand
 } = require('../src/commands/quality');
 const { runMigrationSummary } = require('../src/commands/summary');
-const { runInteractiveWizard } = require('../src/commands/wizard');
-const { JiraRequestError } = require('../src/services/jira');
+const { runMigrationPipeline } = require('../src/commands/run');
+const {
+  runInteractiveWizard,
+  runTasksWizard
+} = require('../src/commands/wizard');
+const { JiraClient, JiraRequestError } = require('../src/services/jira');
 
 const program = new Command();
 
@@ -68,7 +72,49 @@ Sin configuración Jira se genera:
       return;
     }
 
+    if (process.stdout.isTTY && !JiraClient.isConfigured(process.env)) {
+      await runTasksWizard({
+        microserviceName,
+        currentDirectory: process.cwd(),
+        environment: process.env,
+        promptApi: require('@clack/prompts'),
+        output: console.log
+      });
+      return;
+    }
+
     await runInitCommand(microserviceName);
+  });
+
+program
+  .command('run [microservicePath]')
+  .description('Ejecuta el pipeline Zero-Config de Estaciones 0 a 3 con tolerancia a fallos.')
+  .option('--source <rutaOUrl>', 'Definición OpenAPI, Swagger o Postman; se detecta automáticamente si se omite.')
+  .option('--base-url <url>', 'URL base para ejecutar la baseline PRE cuando la definición no tiene servidor.')
+  .option('--post-base-url <url>', 'URL base migrada para ejecutar POST y el motor de paridad.')
+  .option('--auth-token <token>', 'Token Bearer opcional para endpoints; prevalece sobre AUTH_TOKEN.')
+  .option('--bump <tipo>', 'Incremento de versión: patch, minor o snapshot.', 'patch')
+  .option('--timeout <milisegundos>', 'Tiempo máximo por endpoint en milisegundos.', Number)
+  .addHelpText('after', `
+Ejemplos:
+  $ migration-cli run ./auth-service
+  $ migration-cli run ./auth-service --post-base-url https://api-migrada.example.com
+  $ migration-cli run ./auth-service --source docs/openapi.yaml --bump minor
+
+El pipeline detecta definición API, genera tareas Jira o checklist local, ejecuta
+PRE, versionado, README, cobertura, SonarQube, POST opcional y resumen maestro.
+Los fallos no críticos se registran como [WARNING] y no detienen el flujo.
+`)
+  .action(async (microservicePath, options) => {
+    await runMigrationPipeline(microservicePath || process.cwd(), {
+      currentDirectory: process.cwd(),
+      source: options.source,
+      baseUrl: options.baseUrl,
+      postBaseUrl: options.postBaseUrl,
+      authToken: options.authToken || process.env.AUTH_TOKEN,
+      bumpType: options.bump,
+      timeoutMs: options.timeout
+    });
   });
 
 program

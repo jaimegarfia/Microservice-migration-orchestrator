@@ -50,52 +50,60 @@ function normalizeBaseUrl(baseUrl) {
 }
 
 async function discoverEndpointSource(currentDirectory = process.cwd()) {
-  const candidates = [
-    ...[...OPENAPI_FILE_NAMES].map((name) => path.join(currentDirectory, name)),
-    ...[...OPENAPI_FILE_NAMES].map((name) =>
-      path.join(currentDirectory, 'docs', name)
-    )
+  const sources = await discoverEndpointSources(currentDirectory);
+  return sources[0] || null;
+}
+
+async function discoverEndpointSources(currentDirectory = process.cwd(), {
+  fileSystem = { readdir }
+} = {}) {
+  const directories = [
+    currentDirectory,
+    path.join(currentDirectory, 'docs'),
+    path.join(currentDirectory, 'postman')
   ];
+  const discovered = [];
 
-  for (const candidate of candidates) {
+  for (const directory of directories) {
+    let entries;
     try {
-      await readFile(candidate);
-      return { type: 'file', path: candidate };
+      entries = await fileSystem.readdir(directory, { withFileTypes: true });
     } catch (error) {
-      if (error.code !== 'ENOENT') {
-        throw new EndpointSourceError(
-          `No se pudo leer la definicion de endpoints: ${candidate}.`,
-          { cause: error }
-        );
+      if (error.code === 'ENOENT') {
+        continue;
       }
-    }
-  }
 
-  const postmanDirectory = path.join(currentDirectory, 'postman');
-  try {
-    const files = await readdir(postmanDirectory, { withFileTypes: true });
-    const collection = files.find(
-      (entry) =>
-        entry.isFile() &&
-        entry.name.toLowerCase().endsWith('.json')
-    );
-
-    if (collection) {
-      return {
-        type: 'file',
-        path: path.join(postmanDirectory, collection.name)
-      };
-    }
-  } catch (error) {
-    if (error.code !== 'ENOENT') {
       throw new EndpointSourceError(
-        `No se pudo explorar el directorio Postman: ${postmanDirectory}.`,
+        `No se pudo explorar el directorio de endpoints: ${directory}.`,
         { cause: error }
       );
     }
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !isEndpointDefinitionFile(entry.name, directory)) {
+        continue;
+      }
+
+      discovered.push({
+        type: 'file',
+        path: path.join(directory, entry.name)
+      });
+    }
   }
 
-  return null;
+  return discovered.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function isEndpointDefinitionFile(fileName, directory) {
+  const normalizedName = fileName.toLowerCase();
+  const isJsonOrYaml = /\.(json|ya?ml)$/.test(normalizedName);
+  const isKnownOpenApi = OPENAPI_FILE_NAMES.has(normalizedName);
+  const isNamedOpenApi = /(?:swagger|openapi)/.test(normalizedName) && isJsonOrYaml;
+  const isPostmanCollection =
+    path.basename(directory).toLowerCase() === 'postman' &&
+    normalizedName.endsWith('.json');
+
+  return isKnownOpenApi || isNamedOpenApi || isPostmanCollection;
 }
 
 async function loadEndpointDefinition(source, {
@@ -447,6 +455,7 @@ module.exports = {
   createPayloadSnippet,
   createPostMigrationReport,
   discoverEndpointSource,
+  discoverEndpointSources,
   executeGetEndpoints,
   extractGetEndpoints,
   loadEndpointDefinition,

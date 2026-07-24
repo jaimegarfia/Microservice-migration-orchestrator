@@ -6,8 +6,11 @@ const test = require('node:test');
 const {
   buildExecutionSummary,
   createProgressHandlers,
+  promptForJiraConfiguration,
   runEndpointsBaselineWizard,
   runInteractiveWizard,
+  runTasksWizard,
+  selectEndpointSource,
   validateMicroserviceSlug
 } = require('../src/commands/wizard');
 
@@ -19,19 +22,21 @@ function createPromptApi({
 } = {}) {
   const events = [];
   const spinnerEvents = [];
-  const textValues = toQueue(text);
-  const selectValues = toQueue(select);
-  const confirmValues = toQueue(confirm);
-  const passwordValues = toQueue(password);
+  const values = {
+    text: toQueue(text),
+    select: toQueue(select),
+    confirm: toQueue(confirm),
+    password: toQueue(password)
+  };
 
   return {
     events,
     spinnerEvents,
     intro: (message) => events.push(['intro', message]),
-    text: async () => textValues.shift(),
-    select: async () => selectValues.shift(),
-    confirm: async () => confirmValues.shift(),
-    password: async () => passwordValues.shift(),
+    text: async () => values.text.shift(),
+    select: async () => values.select.shift(),
+    confirm: async () => values.confirm.shift(),
+    password: async () => values.password.shift(),
     note: (message, title) => events.push(['note', title, message]),
     outro: (message) => events.push(['outro', message]),
     cancel: (message) => events.push(['cancel', message]),
@@ -54,68 +59,100 @@ test('wizard validates microservice names as lowercase slugs', () => {
   assert.match(validateMicroserviceSlug('auth_service'), /slug en minusculas/);
 });
 
-test('wizard confirms and executes the local Markdown workflow', async () => {
+test('main wizard launches the run pipeline from the zero-config menu', async () => {
   const promptApi = createPromptApi({
-    text: 'auth-service',
-    select: 'local',
-    confirm: [true, false]
+    select: 'run',
+    text: ['/workspace/auth-service', 'https://api-migrada.example.com']
   });
   const calls = [];
 
   const result = await runInteractiveWizard({
     environment: {},
+    currentDirectory: '/workspace',
     promptApi,
+    runPipeline: async (directory, options) => {
+      calls.push({ directory, options });
+      return { microserviceName: 'auth-service', warnings: [] };
+    }
+  });
+
+  assert.equal(result.microserviceName, 'auth-service');
+  assert.equal(calls[0].directory, '/workspace/auth-service');
+  assert.equal(calls[0].options.postBaseUrl, 'https://api-migrada.example.com');
+  assert.ok(promptApi.events.some(([type]) => type === 'outro'));
+});
+
+test('task wizard falls back to local checklist when Jira setup is declined', async () => {
+  const promptApi = createPromptApi({ confirm: [false, true] });
+  const calls = [];
+
+  const result = await runTasksWizard({
+    microserviceName: 'auth-service',
+    environment: {},
+    currentDirectory: '/workspace',
+    promptApi,
+    output: () => {},
     runInit: async (name, options) => {
       calls.push({ name, options });
-      options.progress.onLocalStart({ microserviceName: name });
+      options.progress.onLocalStart();
       options.progress.onLocalCreated({
-        historyPath: '/tmp/jira-tasks-auth-service.md'
+        historyPath: '/workspace/.axetrules/history/jira-tasks-auth-service.md'
       });
-
       return {
         mode: 'local',
-        historyPath: '/tmp/jira-tasks-auth-service.md'
+        historyPath: '/workspace/.axetrules/history/jira-tasks-auth-service.md'
       };
     }
   });
 
   assert.equal(result.mode, 'local');
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].name, 'auth-service');
   assert.equal(calls[0].options.mode, 'local');
   assert.deepEqual(promptApi.spinnerEvents, [
     ['start', 'Generando checklist Markdown local...'],
-    ['stop', 'Checklist guardado en /tmp/jira-tasks-auth-service.md']
+    ['stop', 'Checklist guardado en /workspace/.axetrules/history/jira-tasks-auth-service.md']
   ]);
-  assert.ok(
-    promptApi.events.some(
-      ([type, title]) => type === 'note' && title === 'Inicializacion completada'
-    )
-  );
 });
 
-test('wizard stops safely if Jira is selected without a Jira configuration', async () => {
+test('Jira prompt validates temporary credentials without persisting them', async () => {
   const promptApi = createPromptApi({
-    text: 'auth-service',
-    select: 'jira'
+    text: ['https://jira.example.com', 'MYPROJ'],
+    password: 'secret-token'
   });
-  let executed = false;
+  let receivedEnvironment;
 
-  const result = await runInteractiveWizard({
-    environment: {},
+  const configured = await promptForJiraConfiguration({
+    environment: { EXISTING: 'value' },
     promptApi,
-    runInit: async () => {
-      executed = true;
+    jiraClientFactory: (environment) => {
+      receivedEnvironment = environment;
+      return {
+        validateConnection: async () => ({ key: 'MYPROJ', name: 'Migration' })
+      };
     }
   });
 
-  assert.equal(result.mode, 'cancelled');
-  assert.equal(executed, false);
-  assert.ok(
-    promptApi.events.some(
-      ([type, title]) => type === 'note' && title === 'Jira necesita configuracion'
-    )
-  );
+  assert.equal(configured.JIRA_HOST, 'https://jira.example.com');
+  assert.equal(configured.JIRA_PROJECT_KEY, 'MYPROJ');
+  assert.equal(configured.JIRA_API_TOKEN, 'secret-token');
+  assert.equal(receivedEnvironment.EXISTING, 'value');
+  assert.deepEqual(promptApi.spinnerEvents, [
+    ['start', 'Validando conexión con Jira...'],
+    ['stop', 'Conectado a Jira: MYPROJ (Migration).']
+  ]);
+});
+
+test('endpoint source selector lets users choose among discovered definitions', async () => {
+  const promptApi = createPromptApi({ select: '/workspace/postman/service.json' });
+  const selected = await selectEndpointSource({
+    currentDirectory: '/workspace',
+    promptApi,
+    discoverSources: async () => [
+      { type: 'file', path: '/workspace/docs/openapi.yaml' },
+      { type: 'file', path: '/workspace/postman/service.json' }
+    ]
+  });
+
+  assert.equal(selected, '/workspace/postman/service.json');
 });
 
 test('endpoint baseline wizard uses detected definition and password token', async () => {
@@ -152,9 +189,7 @@ test('endpoint baseline wizard uses detected definition and password token', asy
   });
 
   assert.equal(result.reportPath, '/workspace/.axetrules/history/run/endpoints-pre.json');
-  assert.equal(calls[0].name, 'auth-service');
   assert.equal(calls[0].options.source, '/workspace/docs/openapi.yaml');
-  assert.equal(calls[0].options.baseUrl, 'https://api.example.com');
   assert.equal(calls[0].options.authToken, 'temporary-token');
   assert.deepEqual(promptApi.spinnerEvents, [
     ['start', 'Preparando 1 endpoints GET...'],
@@ -189,8 +224,5 @@ test('progress handlers communicate parent and subtask progress', () => {
 
 test('execution summary states the operation destination', () => {
   assert.match(buildExecutionSummary('auth-service', 'jira'), /en Jira/);
-  assert.match(
-    buildExecutionSummary('auth-service', 'local'),
-    /Markdown local/
-  );
+  assert.match(buildExecutionSummary('auth-service', 'local'), /Markdown local/);
 });

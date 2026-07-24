@@ -64,6 +64,34 @@ class JiraClient {
     );
   }
 
+  async validateConnection() {
+    const response = await this.fetch(
+      `${this.host}/rest/api/2/project/${encodeURIComponent(this.projectKey)}`,
+      {
+        headers: {
+          Accept: 'application/json',
+          Authorization: this.authorization
+        }
+      }
+    );
+    const responseBody = await parseResponseBody(response);
+
+    if (!response.ok) {
+      throw new JiraRequestError(
+        `No se pudo validar la conexión con Jira (${response.status}): ${getJiraErrorMessage(responseBody)}`,
+        {
+          status: response.status,
+          responseBody
+        }
+      );
+    }
+
+    return {
+      key: responseBody?.key || this.projectKey,
+      name: responseBody?.name
+    };
+  }
+
   async createMigrationEpicOrTask(microserviceName) {
     const serviceName = validateMicroserviceName(microserviceName);
 

@@ -12,6 +12,7 @@ CLI en Node.js para orquestar una migración de microservicio mediante una **lí
 
 - [Requisitos e instalación](#requisitos-e-instalación)
 - [Inicio rápido](#inicio-rápido)
+- [Modo Zero-Config y pipeline one-click](#modo-zero-config-y-pipeline-one-click)
 - [Línea de producción por estaciones](#línea-de-producción-por-estaciones)
 - [Comandos CLI](#comandos-cli)
 - [Motor de paridad API](#motor-de-paridad-api)
@@ -63,7 +64,17 @@ npm start
 
 ## Inicio rápido
 
-Este ejemplo ejecuta las estaciones principales para `auth-service`:
+Para ejecutar toda la línea de producción con la mínima configuración:
+
+```bash
+migration-cli run ./auth-service
+
+# Incluye pruebas POST y paridad si ya conoces la URL migrada.
+migration-cli run ./auth-service \
+  --post-base-url https://api-migrada.example.com
+```
+
+También puedes ejecutar cada estación individualmente:
 
 ```bash
 # Estación 0: crea tareas en Jira o un checklist Markdown local.
@@ -90,6 +101,44 @@ migration-cli summary auth-service ./auth-service
 ```
 
 Ejecuta `migration-cli <comando> --help` para consultar ejemplos, flags y variables de entorno específicas de cada comando.
+
+## Modo Zero-Config y pipeline one-click
+
+`run` es la ruta recomendada para automatizar una migración completa. Recibe la ruta del microservicio, o usa el directorio actual:
+
+```bash
+migration-cli run [microservicePath] [opciones]
+```
+
+Secuencia ejecutada:
+
+1. **Estación 0:** crea incidencias Jira cuando hay credenciales; si no, genera el checklist local.
+2. **Estación 0:** detecta una definición OpenAPI, Swagger o Postman y genera la baseline PRE.
+3. **Estación 1:** incrementa la versión (`patch` por defecto) y genera el README técnico.
+4. **Estación 2:** ejecuta cobertura JaCoCo y consulta SonarQube.
+5. **Estación 3:** con `--post-base-url`, ejecuta POST, el motor de paridad y el resumen maestro.
+
+Opciones principales:
+
+```bash
+migration-cli run ./auth-service \
+  --source docs/openapi.yaml \
+  --base-url https://api-original.example.com \
+  --post-base-url https://api-migrada.example.com \
+  --bump minor \
+  --timeout 15000
+```
+
+El pipeline es **tolerante a fallos**: una definición ausente, JaCoCo no disponible, SonarQube sin configurar o un error de un paso se informa como `[WARNING]`; las estaciones posteriores y la generación del resumen continúan. Las incidencias se reflejan en los artefactos de evidencia y el panel final.
+
+### Auto-descubrimiento de API
+
+Sin `--source`, el CLI explora la raíz del microservicio, `docs/` y `postman/` para archivos `.json`, `.yaml` o `.yml` cuyo nombre contenga `swagger` u `openapi`, además de colecciones JSON ubicadas en `postman/`.
+
+- En `run` no interactivo se usa la primera coincidencia ordenada y se registra una advertencia si hay varias.
+- En el wizard se presenta un selector navegable con flechas cuando hay varias coincidencias.
+- Si no existe ninguna definición en el wizard, se solicita de forma amistosa una ruta local o URL remota.
+- En modo no interactivo, la ausencia de fuente no detiene el pipeline: omite la estación de endpoints y registra `[WARNING]`.
 
 ## Línea de producción por estaciones
 
@@ -126,11 +175,7 @@ La baseline PRE ejecuta únicamente endpoints `GET`, conserva status, tiempo de 
 migration-cli endpoints --pre auth-service --source docs/openapi.yaml
 ```
 
-La fuente de endpoints se detecta automáticamente en este orden:
-
-1. `swagger.*` u `openapi.*` en la raíz.
-2. `docs/swagger.*` o `docs/openapi.*`.
-3. El primer JSON de `postman/`.
+La fuente de endpoints se detecta automáticamente en raíz, `docs/` y `postman/`. Se admiten nombres que contengan `swagger` u `openapi` con extensión JSON/YAML, además de colecciones JSON dentro de `postman/`. El wizard permite elegir cuando hay varias fuentes.
 
 También puede indicarse manualmente:
 
@@ -219,7 +264,8 @@ El segundo argumento de `summary` es opcional; permite indicar la ruta del micro
 | Comando | Descripción |
 | --- | --- |
 | `migration-cli` | Inicia el asistente interactivo. |
-| `migration-cli init [microserviceName]` | Crea tareas Jira o checklist local. Sin argumento inicia el asistente. |
+| `migration-cli init [microserviceName]` | Crea tareas Jira o checklist local. En TTY sin Jira ofrece configurarlo en vivo. Sin argumento inicia el asistente. |
+| `migration-cli run [microservicePath]` | Pipeline One-Click Zero-Config de Estaciones 0 a 3, tolerante a fallos. |
 | `migration-cli endpoints --pre <microserviceName>` | Captura la baseline de endpoints GET previa. |
 | `migration-cli endpoints --post <microserviceName>` | Ejecuta GET tras migración y analiza paridad. |
 | `migration-cli version --bump <tipo> [microservicePath]` | Actualiza versiones de build y Sonar. |
@@ -366,15 +412,18 @@ Ejecuta sin argumentos:
 migration-cli
 ```
 
-El wizard guía el proceso:
+El menú principal muestra:
 
-1. solicita un nombre de microservicio con formato `kebab-case`;
-2. detecta configuración Jira y permite elegir Jira o Markdown local;
-3. confirma la creación de tareas;
-4. ofrece ejecutar baseline PRE;
-5. ofrece Estación 1 (versionado y README);
-6. ofrece Estación 2 (cobertura y SonarQube);
-7. ofrece Estación 3 (POST, paridad y reporte maestro).
+1. `🚀 Ejecutar Migración Completa` — inicia el pipeline `run`.
+2. `📋 Gestionar Tareas` — Estación 0.
+3. `🔍 Analizar Endpoints y Paridad` — Estaciones 0 y 3.
+4. `🛠️ Versionado y Documentación` — Estación 1.
+5. `🧪 Cobertura y Calidad` — Estación 2.
+6. `❌ Salir`.
+
+Cuando faltan variables Jira y existe una TTY, el flujo de tareas pregunta si deseas configurarlo en ese momento. Solicita `JIRA_HOST`, `JIRA_PROJECT_KEY` y `JIRA_API_TOKEN` como contraseña oculta, valida el acceso al proyecto y usa las credenciales **sólo en memoria** para crear la tarea padre y sus subtareas. Si se rechaza la configuración, se cancela o falla la validación, genera el checklist Markdown local sin bloquear el flujo.
+
+En CI/CD o terminales no interactivas no se solicitan datos: el comportamiento se mantiene determinista y usa el fallback local.
 
 Usa confirmaciones explícitas antes de crear incidencias, modificar versiones, generar documentación o lanzar análisis.
 

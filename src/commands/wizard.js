@@ -10,7 +10,8 @@ const {
 const { runStation1Preparation } = require('./station1');
 const { runStation2Quality } = require('./quality');
 const { runMigrationSummary } = require('./summary');
-const { discoverEndpointSource } = require('../services/endpoints');
+const { runMigrationPipeline } = require('./run');
+const { discoverEndpointSources } = require('../services/endpoints');
 const { JiraClient } = require('../services/jira');
 
 const MICROSERVICE_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -29,7 +30,6 @@ function validateMicroserviceSlug(value) {
 
 function buildExecutionSummary(microserviceName, mode) {
   const destination = mode === 'jira' ? 'en Jira' : 'en un archivo Markdown local';
-
   return [
     `Microservicio: ${microserviceName}`,
     `Destino: ${destination}`,
@@ -39,28 +39,18 @@ function buildExecutionSummary(microserviceName, mode) {
 
 function buildSuccessPanel(result) {
   if (result.mode === 'jira') {
-    const links = [
-      `Padre: ${result.parent.key} - ${result.parent.url}`,
-      ...result.subtasks.map(
-        (subtask) => `Subtarea: ${subtask.key} - ${subtask.url}`
-      )
-    ];
-
     return [
       pc.bold(pc.green('Tareas de migracion creadas correctamente')),
       '',
-      ...links,
-      '',
-      pc.dim('Siguiente paso: inicia la Estacion 0 con las pruebas de endpoints.')
+      `Padre: ${result.parent.key} - ${result.parent.url}`,
+      ...result.subtasks.map((subtask) => `Subtarea: ${subtask.key} - ${subtask.url}`)
     ].join('\n');
   }
 
   return [
     pc.bold(pc.green('Checklist de migracion generado correctamente')),
     '',
-    `Archivo: ${result.historyPath}`,
-    '',
-    pc.dim('Siguiente paso: completa la Estacion 0 y actualiza el checklist.')
+    `Archivo: ${result.historyPath}`
   ].join('\n');
 }
 
@@ -68,128 +58,209 @@ async function runInteractiveWizard({
   environment = process.env,
   currentDirectory = process.cwd(),
   promptApi = prompts,
-  runInit = runInitCommand,
-  output = () => {}
+  output = () => {},
+  runPipeline = runMigrationPipeline,
+  runInit = runInitCommand
 } = {}) {
   promptApi.intro(pc.bgCyan(pc.black(' Microservice Migration Orchestrator ')));
 
-  const microserviceName = await promptApi.text({
-    message: 'Nombre del microservicio:',
-    placeholder: 'auth-service',
-    validate: validateMicroserviceSlug
+  const action = await promptApi.select({
+    message: '¿Qué deseas hacer?',
+    options: [
+      { value: 'run', label: '🚀 Ejecutar Migración Completa', hint: 'Auto-pipeline run' },
+      { value: 'tasks', label: '📋 Gestionar Tareas', hint: 'Estación 0' },
+      { value: 'endpoints', label: '🔍 Analizar Endpoints y Paridad', hint: 'Estaciones 0 y 3' },
+      { value: 'station1', label: '🛠️ Versionado y Documentación', hint: 'Estación 1' },
+      { value: 'station2', label: '🧪 Cobertura y Calidad', hint: 'Estación 2' },
+      { value: 'exit', label: '❌ Salir' }
+    ]
   });
 
-  if (isCancelled(microserviceName, promptApi)) {
-    return cancelWizard(promptApi);
+  if (isCancelled(action, promptApi) || action === 'exit') {
+    return cancelWizard(promptApi, 'Hasta pronto.');
   }
 
-  const jiraConfigured = JiraClient.isConfigured(environment);
-  let mode = 'jira';
-
-  if (!jiraConfigured) {
-    promptApi.note(
-      'No se detecto una configuracion Jira completa. Puedes generar un checklist local o configurar Jira antes de continuar.',
-      'Entorno Jira'
-    );
-
-    mode = await promptApi.select({
-      message: 'Donde deseas crear las tareas?',
-      options: [
-        {
-          value: 'jira',
-          label: 'Jira',
-          hint: 'requiere configurar JIRA_HOST, JIRA_PROJECT_KEY y autenticacion'
-        },
-        {
-          value: 'local',
-          label: 'Local Markdown',
-          hint: 'genera .axetrules/history/jira-tasks-<servicio>.md'
-        }
-      ]
-    });
-
-    if (isCancelled(mode, promptApi)) {
+  if (action === 'run') {
+    const projectDirectory = await askProjectDirectory(currentDirectory, promptApi);
+    if (!projectDirectory) {
       return cancelWizard(promptApi);
     }
 
-    if (mode === 'jira') {
-      promptApi.note(
-        'Configura JIRA_HOST, JIRA_PROJECT_KEY y JIRA_AUTH_BASIC o JIRA_API_TOKEN. A continuacion vuelve a ejecutar el asistente.',
-        'Jira necesita configuracion'
-      );
-      return cancelWizard(promptApi, 'No se realizaron cambios.');
+    const postBaseUrl = await promptApi.text({
+      message: 'URL base de la API migrada para paridad POST (opcional):',
+      placeholder: 'https://api-migrada.example.com'
+    });
+    if (isCancelled(postBaseUrl, promptApi)) {
+      return cancelWizard(promptApi);
+    }
+
+    const result = await runPipeline(projectDirectory, {
+      currentDirectory,
+      environment,
+      output,
+      postBaseUrl: postBaseUrl || undefined
+    });
+    promptApi.outro(pc.green('Pipeline finalizado.'));
+    return result;
+  }
+
+  const microserviceName = await askMicroserviceName(promptApi);
+  if (!microserviceName) {
+    return cancelWizard(promptApi);
+  }
+
+  if (action === 'tasks') {
+    const result = await runTasksWizard({
+      microserviceName,
+      environment,
+      currentDirectory,
+      promptApi,
+      output,
+      runInit
+    });
+    promptApi.outro(pc.green('Gestión de tareas finalizada.'));
+    return result;
+  }
+
+  if (action === 'endpoints') {
+    const phase = await promptApi.select({
+      message: 'Fase de endpoints:',
+      options: [
+        { value: 'pre', label: 'PRE', hint: 'baseline antes de migrar' },
+        { value: 'post', label: 'POST', hint: 'comparar contra baseline PRE' }
+      ]
+    });
+    if (isCancelled(phase, promptApi)) {
+      return cancelWizard(promptApi);
+    }
+
+    const result = phase === 'pre'
+      ? await runEndpointsBaselineWizard({
+        microserviceName, environment, currentDirectory, promptApi, output
+      })
+      : await runStation3Wizard({
+        microserviceName, environment, currentDirectory, promptApi, output,
+        skipConfirmation: true
+      });
+    promptApi.outro(pc.green('Análisis de endpoints finalizado.'));
+    return result;
+  }
+
+  const projectDirectory = await askProjectDirectory(currentDirectory, promptApi);
+  if (!projectDirectory) {
+    return cancelWizard(promptApi);
+  }
+
+  const result = action === 'station1'
+    ? await runStation1PreparationWizard({
+      currentDirectory: projectDirectory, promptApi, output, skipQuestion: true
+    })
+    : await runStation2QualityWizard({
+      currentDirectory: projectDirectory, environment, promptApi, output, skipQuestion: true
+    });
+
+  promptApi.outro(pc.green('Proceso finalizado.'));
+  return result;
+}
+
+async function runTasksWizard({
+  microserviceName,
+  environment,
+  currentDirectory,
+  promptApi,
+  output,
+  runInit = runInitCommand,
+  jiraClientFactory = JiraClient.fromEnvironment
+}) {
+  let runtimeEnvironment = environment;
+  let mode = 'auto';
+
+  if (!JiraClient.isConfigured(environment)) {
+    const configureJira = await promptApi.confirm({
+      message: '⚠️ No se detectó configuración de Jira. ¿Deseas configurarla ahora para crear la Epic y subtareas?',
+      initialValue: true
+    });
+    if (isCancelled(configureJira, promptApi)) {
+      return { mode: 'cancelled' };
+    }
+
+    if (configureJira) {
+      runtimeEnvironment = await promptForJiraConfiguration({
+        environment, promptApi, jiraClientFactory
+      });
+      if (!runtimeEnvironment) {
+        mode = 'local';
+      } else {
+        mode = 'jira';
+      }
+    } else {
+      mode = 'local';
     }
   }
 
-  promptApi.note(buildExecutionSummary(microserviceName, mode), 'Resumen');
+  promptApi.note(buildExecutionSummary(microserviceName, mode === 'auto' ? 'jira' : mode), 'Resumen');
   const confirmed = await promptApi.confirm({
-    message: 'Confirmas la ejecucion?',
+    message: '¿Confirmas la ejecución?',
     initialValue: true
   });
-
   if (isCancelled(confirmed, promptApi) || !confirmed) {
-    return cancelWizard(promptApi, 'Operacion cancelada. No se realizaron cambios.');
+    return { mode: 'cancelled' };
   }
 
   const spinner = promptApi.spinner();
   const result = await runInit(microserviceName, {
-    environment,
+    environment: runtimeEnvironment,
     currentDirectory,
     mode,
     output,
     progress: createProgressHandlers(spinner)
   });
+  promptApi.note(buildSuccessPanel(result), 'Inicialización completada');
+  return result;
+}
 
-  promptApi.note(buildSuccessPanel(result), 'Inicializacion completada');
-
-  const shouldRunBaseline = await promptApi.confirm({
-    message: 'Deseas ejecutar ahora la baseline PRE de endpoints?',
-    initialValue: false
+async function promptForJiraConfiguration({
+  environment,
+  promptApi,
+  jiraClientFactory = JiraClient.fromEnvironment
+}) {
+  const host = await promptApi.text({
+    message: 'JIRA_HOST:',
+    placeholder: 'https://jira.example.com',
+    validate: (value) => value?.trim() ? undefined : 'JIRA_HOST es obligatorio.'
+  });
+  const projectKey = await promptApi.text({
+    message: 'JIRA_PROJECT_KEY:',
+    placeholder: 'MYPROJ',
+    validate: (value) => value?.trim() ? undefined : 'JIRA_PROJECT_KEY es obligatorio.'
+  });
+  const token = await promptApi.password({
+    message: 'JIRA_API_TOKEN:',
+    validate: (value) => value?.trim() ? undefined : 'JIRA_API_TOKEN es obligatorio.'
   });
 
-  let baselineResult;
-  if (isCancelled(shouldRunBaseline, promptApi)) {
-    return cancelWizard(promptApi);
+  if ([host, projectKey, token].some((value) => isCancelled(value, promptApi))) {
+    return undefined;
   }
 
-  if (shouldRunBaseline) {
-    baselineResult = await runEndpointsBaselineWizard({
-      microserviceName,
-      environment,
-      currentDirectory,
-      promptApi,
-      output
-    });
-  }
-
-  const station1Result = await runStation1PreparationWizard({
-    currentDirectory,
-    promptApi,
-    output
-  });
-  const station2Result = await runStation2QualityWizard({
-    currentDirectory,
-    environment,
-    promptApi,
-    output
-  });
-  const station3Result = await runStation3Wizard({
-    microserviceName,
-    currentDirectory,
-    environment,
-    promptApi,
-    output
-  });
-
-  promptApi.outro(pc.green('Proceso finalizado.'));
-
-  return {
-    ...result,
-    ...(baselineResult ? { baseline: baselineResult } : {}),
-    ...(station1Result ? { station1: station1Result } : {}),
-    ...(station2Result ? { station2: station2Result } : {}),
-    ...(station3Result ? { station3: station3Result } : {})
+  const runtimeEnvironment = {
+    ...environment,
+    JIRA_HOST: host.trim(),
+    JIRA_PROJECT_KEY: projectKey.trim(),
+    JIRA_API_TOKEN: token.trim()
   };
+
+  const spinner = promptApi.spinner();
+  spinner.start('Validando conexión con Jira...');
+  try {
+    const project = await jiraClientFactory(runtimeEnvironment).validateConnection();
+    spinner.stop(`Conectado a Jira: ${project.key}${project.name ? ` (${project.name})` : ''}.`);
+    return runtimeEnvironment;
+  } catch (error) {
+    spinner.stop('No se pudo validar Jira; se usará checklist local.');
+    promptApi.note(error.message, 'Conexión Jira');
+    return undefined;
+  }
 }
 
 async function runEndpointsBaselineWizard({
@@ -199,128 +270,99 @@ async function runEndpointsBaselineWizard({
   promptApi,
   output,
   runBaseline = runPreMigrationEndpoints,
-  discoverSource = discoverEndpointSource
+  discoverSources = discoverEndpointSources,
+  discoverSource
 }) {
-  const discoveredSource = await discoverSource(currentDirectory);
-  let source = discoveredSource?.path;
-
-  if (source) {
-    promptApi.note(`Definicion detectada: ${source}`, 'Endpoints');
-  } else {
-    source = await promptApi.text({
-      message: 'Ruta o URL de OpenAPI/Swagger/Postman:',
-      placeholder: 'docs/openapi.yaml o https://api.example.com/openapi.json',
-      validate: (value) =>
-        value?.trim() ? undefined : 'Indica una ruta o URL de definicion.'
-    });
-
-    if (isCancelled(source, promptApi)) {
-      return { mode: 'cancelled' };
-    }
+  const source = await selectEndpointSource({
+    currentDirectory,
+    promptApi,
+    discoverSources: discoverSource
+      ? async (directory) => {
+        const discovered = await discoverSource(directory);
+        return discovered ? [discovered] : [];
+      }
+      : discoverSources
+  });
+  if (!source) {
+    return { mode: 'cancelled' };
   }
 
   const baseUrl = await promptApi.text({
     message: 'URL base de la API (opcional):',
     placeholder: 'https://api.example.com'
   });
-
-  if (isCancelled(baseUrl, promptApi)) {
+  const authToken = await askAuthToken(environment, promptApi);
+  if (isCancelled(baseUrl, promptApi) || authToken === null) {
     return { mode: 'cancelled' };
   }
 
-  let authToken = environment.AUTH_TOKEN;
-  if (!authToken) {
-    authToken = await promptApi.password({
-      message: 'Bearer token OAuth2 (opcional):'
-    });
-
-    if (isCancelled(authToken, promptApi)) {
-      return { mode: 'cancelled' };
-    }
-  }
-
-  const spinner = promptApi.spinner();
   return runBaseline(microserviceName, {
     source,
     baseUrl: baseUrl || undefined,
     authToken: authToken || undefined,
     currentDirectory,
     output,
-    progress: {
-      onDiscovery: ({ total }) =>
-        spinner.start(`Preparando ${total} endpoints GET...`),
-      onEndpointStart: ({ index, total, endpoint }) =>
-        spinner.start(`Probando endpoint ${index}/${total}: ${endpoint.endpoint}`),
-      onEndpointComplete: ({ index, total, result }) =>
-        spinner.stop(
-          `Endpoint ${index}/${total}: ${result.status ?? 'ERROR'} (${result.responseTimeMs} ms)`
-        )
-    }
+    progress: createEndpointProgressHandlers(promptApi.spinner())
   });
+}
+
+async function selectEndpointSource({ currentDirectory, promptApi, discoverSources }) {
+  const sources = await discoverSources(currentDirectory);
+  if (sources.length === 1) {
+    promptApi.note(`Definición detectada: ${sources[0].path}`, 'Endpoints');
+    return sources[0].path;
+  }
+
+  if (sources.length > 1) {
+    const selected = await promptApi.select({
+      message: 'Se detectaron varias definiciones. Selecciona una:',
+      options: sources.map((source) => ({
+        value: source.path,
+        label: source.path,
+        hint: source.type
+      }))
+    });
+    return isCancelled(selected, promptApi) ? undefined : selected;
+  }
+
+  const source = await promptApi.text({
+    message: 'No se detectó OpenAPI/Swagger/Postman. Indica ruta o URL:',
+    placeholder: 'docs/openapi.yaml o https://api.example.com/openapi.json',
+    validate: (value) => value?.trim() ? undefined : 'Indica una ruta o URL de definición.'
+  });
+  return isCancelled(source, promptApi) ? undefined : source.trim();
 }
 
 async function runStation1PreparationWizard({
   currentDirectory,
   promptApi,
   output,
-  runPreparation = runStation1Preparation
+  runPreparation = runStation1Preparation,
+  skipQuestion = false
 }) {
-  const shouldPrepare = await promptApi.confirm({
-    message: 'Deseas preparar la Estacion 1 (versionado y README tecnico)?',
-    initialValue: false
-  });
-
-  if (isCancelled(shouldPrepare, promptApi) || !shouldPrepare) {
-    return undefined;
-  }
-
-  const projectDirectory = await promptApi.text({
-    message: 'Ruta del microservicio:',
-    initialValue: currentDirectory,
-    validate: (value) => value?.trim() ? undefined : 'Indica una ruta de proyecto.'
-  });
-
-  if (isCancelled(projectDirectory, promptApi)) {
-    return { mode: 'cancelled' };
+  if (!skipQuestion) {
+    const shouldPrepare = await promptApi.confirm({
+      message: '¿Deseas preparar la Estación 1 (versionado y README técnico)?',
+      initialValue: false
+    });
+    if (isCancelled(shouldPrepare, promptApi) || !shouldPrepare) {
+      return undefined;
+    }
   }
 
   const bumpType = await promptApi.select({
-    message: 'Tipo de incremento de version:',
+    message: 'Tipo de incremento de versión:',
     options: [
       { value: 'patch', label: 'Patch', hint: '1.0.0 → 1.0.1' },
       { value: 'minor', label: 'Minor', hint: '1.0.0 → 1.1.0' },
       { value: 'snapshot', label: 'Snapshot', hint: '1.0.0 → 1.0.1-SNAPSHOT' }
     ]
   });
-
   if (isCancelled(bumpType, promptApi)) {
     return { mode: 'cancelled' };
   }
 
-  const confirmed = await promptApi.confirm({
-    message: `Confirmas actualizar la version (${bumpType}) y generar README?`,
-    initialValue: true
-  });
-
-  if (isCancelled(confirmed, promptApi) || !confirmed) {
-    return { mode: 'cancelled' };
-  }
-
-  const spinner = promptApi.spinner();
-  spinner.start('Actualizando version y generando README tecnico...');
-
-  try {
-    const result = await runPreparation(projectDirectory.trim(), bumpType, {
-      output
-    });
-    spinner.stop(
-      `Estacion 1 preparada: ${result.version.previousVersion} → ${result.version.nextVersion}`
-    );
-    return result;
-  } catch (error) {
-    spinner.stop('No se pudo preparar la Estacion 1.');
-    throw error;
-  }
+  return runPreparation(currentDirectory, bumpType, { output });
 }
 
 async function runStation2QualityWizard({
@@ -328,56 +370,24 @@ async function runStation2QualityWizard({
   environment,
   promptApi,
   output,
-  runQuality = runStation2Quality
+  runQuality = runStation2Quality,
+  skipQuestion = false
 }) {
-  const shouldAnalyze = await promptApi.confirm({
-    message: 'Deseas ejecutar el análisis de calidad de la Estacion 2?',
-    initialValue: false
-  });
-
-  if (isCancelled(shouldAnalyze, promptApi) || !shouldAnalyze) {
-    return undefined;
-  }
-
-  const projectDirectory = await promptApi.text({
-    message: 'Ruta del microservicio:',
-    initialValue: currentDirectory,
-    validate: (value) => value?.trim() ? undefined : 'Indica una ruta de proyecto.'
-  });
-
-  if (isCancelled(projectDirectory, promptApi)) {
-    return { mode: 'cancelled' };
-  }
-
-  const confirmed = await promptApi.confirm({
-    message: 'Confirmas ejecutar tests JaCoCo y consultar SonarQube si está configurado?',
-    initialValue: true
-  });
-
-  if (isCancelled(confirmed, promptApi) || !confirmed) {
-    return { mode: 'cancelled' };
-  }
-
-  const spinner = promptApi.spinner();
-  spinner.start('Ejecutando cobertura JaCoCo y análisis SonarQube...');
-
-  try {
-    const result = await runQuality(projectDirectory.trim(), {
-      currentDirectory,
-      environment,
-      output,
-      progress: {
-        onBuildStart: ({ buildTool }) =>
-          spinner.start(`Ejecutando tests y JaCoCo con ${buildTool}...`),
-        onSonarStart: () => spinner.start('Consultando métricas de SonarQube...')
-      }
+  if (!skipQuestion) {
+    const shouldAnalyze = await promptApi.confirm({
+      message: '¿Deseas ejecutar el análisis de calidad de la Estación 2?',
+      initialValue: false
     });
-    spinner.stop('Análisis de calidad de Estacion 2 completado.');
-    return result;
-  } catch (error) {
-    spinner.stop('No se pudo completar el análisis de Estacion 2.');
-    throw error;
+    if (isCancelled(shouldAnalyze, promptApi) || !shouldAnalyze) {
+      return undefined;
+    }
   }
+
+  return runQuality(currentDirectory, {
+    currentDirectory,
+    environment,
+    output
+  });
 }
 
 async function runStation3Wizard({
@@ -388,109 +398,102 @@ async function runStation3Wizard({
   output,
   runPost = runPostMigrationEndpoints,
   runSummary = runMigrationSummary,
-  discoverSource = discoverEndpointSource
+  discoverSources = discoverEndpointSources,
+  skipConfirmation = false
 }) {
-  const shouldRunPost = await promptApi.confirm({
-    message: 'Deseas ejecutar la validación POST y el análisis de paridad de Estacion 3?',
-    initialValue: false
-  });
-
-  if (isCancelled(shouldRunPost, promptApi) || !shouldRunPost) {
-    return undefined;
+  if (!skipConfirmation) {
+    const shouldRunPost = await promptApi.confirm({
+      message: '¿Deseas ejecutar validación POST y paridad de Estación 3?',
+      initialValue: false
+    });
+    if (isCancelled(shouldRunPost, promptApi) || !shouldRunPost) {
+      return undefined;
+    }
   }
 
-  const discoveredSource = await discoverSource(currentDirectory);
-  let source = discoveredSource?.path;
+  const source = await selectEndpointSource({
+    currentDirectory, promptApi, discoverSources
+  });
   if (!source) {
-    source = await promptApi.text({
-      message: 'Ruta o URL de OpenAPI/Swagger/Postman:',
-      validate: (value) => value?.trim() ? undefined : 'Indica una ruta o URL de definición.'
-    });
-    if (isCancelled(source, promptApi)) {
-      return { mode: 'cancelled' };
-    }
+    return { mode: 'cancelled' };
   }
 
   const baseUrl = await promptApi.text({
-    message: 'URL base de la API migrada (opcional):',
-    placeholder: 'https://api.example.com'
+    message: 'URL base de la API migrada:',
+    placeholder: 'https://api-migrada.example.com',
+    validate: (value) => value?.trim() ? undefined : 'La URL base es obligatoria para POST.'
   });
-  if (isCancelled(baseUrl, promptApi)) {
+  const authToken = await askAuthToken(environment, promptApi);
+  if (isCancelled(baseUrl, promptApi) || authToken === null) {
     return { mode: 'cancelled' };
   }
 
-  let authToken = environment.AUTH_TOKEN;
-  if (!authToken) {
-    authToken = await promptApi.password({
-      message: 'Bearer token OAuth2 (opcional):'
-    });
-    if (isCancelled(authToken, promptApi)) {
-      return { mode: 'cancelled' };
-    }
-  }
-
-  const confirmed = await promptApi.confirm({
-    message: 'Confirmas ejecutar pruebas GET POST y comparar contra la baseline PRE?',
-    initialValue: true
-  });
-  if (isCancelled(confirmed, promptApi) || !confirmed) {
-    return { mode: 'cancelled' };
-  }
-
-  const spinner = promptApi.spinner();
-  const postResult = await runPost(microserviceName, {
+  const post = await runPost(microserviceName, {
     source,
-    baseUrl: baseUrl || undefined,
+    baseUrl,
     authToken: authToken || undefined,
     currentDirectory,
-    output,
-    progress: {
-      onDiscovery: ({ total }) => spinner.start(`Preparando ${total} endpoints GET POST...`),
-      onEndpointStart: ({ index, total, endpoint }) =>
-        spinner.start(`Probando POST ${index}/${total}: ${endpoint.endpoint}`),
-      onEndpointComplete: ({ index, total, result }) =>
-        spinner.stop(`POST ${index}/${total}: ${result.status ?? 'ERROR'} (${result.responseTimeMs} ms)`)
-    }
+    output
   });
+  const summary = await runSummary(microserviceName, {
+    currentDirectory,
+    output
+  });
+  return { post, summary };
+}
 
-  const shouldCreateSummary = await promptApi.confirm({
-    message: 'Deseas generar ahora el resumen maestro de migración?',
-    initialValue: true
+async function askMicroserviceName(promptApi) {
+  const value = await promptApi.text({
+    message: 'Nombre del microservicio:',
+    placeholder: 'auth-service',
+    validate: validateMicroserviceSlug
   });
-  if (isCancelled(shouldCreateSummary, promptApi) || !shouldCreateSummary) {
-    return { post: postResult };
+  return isCancelled(value, promptApi) ? undefined : value.trim();
+}
+
+async function askProjectDirectory(currentDirectory, promptApi) {
+  const value = await promptApi.text({
+    message: 'Ruta del microservicio:',
+    initialValue: currentDirectory,
+    validate: (input) => input?.trim() ? undefined : 'Indica una ruta de proyecto.'
+  });
+  return isCancelled(value, promptApi) ? undefined : value.trim();
+}
+
+async function askAuthToken(environment, promptApi) {
+  if (environment.AUTH_TOKEN) {
+    return environment.AUTH_TOKEN;
   }
 
-  spinner.start('Consolidando evidencia de migración...');
-  try {
-    const summary = await runSummary(microserviceName, {
-      currentDirectory,
-      output
-    });
-    spinner.stop('Resumen maestro generado.');
-    return { post: postResult, summary };
-  } catch (error) {
-    spinner.stop('No se pudo generar el resumen maestro.');
-    throw error;
-  }
+  const token = await promptApi.password({
+    message: 'Bearer token OAuth2 (opcional):'
+  });
+  return isCancelled(token, promptApi) ? null : token;
+}
+
+function createEndpointProgressHandlers(spinner) {
+  return {
+    onDiscovery: ({ total }) => spinner.start(`Preparando ${total} endpoints GET...`),
+    onEndpointStart: ({ index, total, endpoint }) =>
+      spinner.start(`Probando endpoint ${index}/${total}: ${endpoint.endpoint}`),
+    onEndpointComplete: ({ index, total, result }) =>
+      spinner.stop(`Endpoint ${index}/${total}: ${result.status ?? 'error'} (${result.responseTimeMs} ms)`)
+  };
 }
 
 function createProgressHandlers(spinner) {
   return {
     onParentStart: () => spinner.start('Conectando con Jira y creando tarea padre...'),
-    onParentCreated: ({ parent }) =>
-      spinner.stop(`Tarea padre creada: ${parent.key}`),
-    onSubtaskStart: ({ index, total }) =>
-      spinner.start(`Creando subtarea ${index}/${total}...`),
+    onParentCreated: ({ parent }) => spinner.stop(`Tarea padre creada: ${parent.key}`),
+    onSubtaskStart: ({ index, total }) => spinner.start(`Creando subtarea ${index}/${total}...`),
     onSubtaskCreated: ({ index, total, subtask }) =>
       spinner.stop(`Subtarea ${index}/${total} creada: ${subtask.key}`),
     onLocalStart: () => spinner.start('Generando checklist Markdown local...'),
-    onLocalCreated: ({ historyPath }) =>
-      spinner.stop(`Checklist guardado en ${historyPath}`)
+    onLocalCreated: ({ historyPath }) => spinner.stop(`Checklist guardado en ${historyPath}`)
   };
 }
 
-function cancelWizard(promptApi, message = 'Operacion cancelada.') {
+function cancelWizard(promptApi, message = 'Operación cancelada.') {
   promptApi.cancel(message);
   return { mode: 'cancelled' };
 }
@@ -503,11 +506,15 @@ module.exports = {
   MICROSERVICE_SLUG_PATTERN,
   buildExecutionSummary,
   buildSuccessPanel,
+  createEndpointProgressHandlers,
   createProgressHandlers,
+  promptForJiraConfiguration,
   runEndpointsBaselineWizard,
   runInteractiveWizard,
   runStation1PreparationWizard,
   runStation2QualityWizard,
   runStation3Wizard,
+  runTasksWizard,
+  selectEndpointSource,
   validateMicroserviceSlug
 };

@@ -4,6 +4,10 @@
 const { Command } = require('commander');
 const { runInitCommand } = require('../src/commands/init');
 const { runPreMigrationEndpoints } = require('../src/commands/endpoints');
+const {
+  runReadmeCommand,
+  runVersionCommand
+} = require('../src/commands/station1');
 const { runInteractiveWizard } = require('../src/commands/wizard');
 const { JiraRequestError } = require('../src/services/jira');
 
@@ -52,6 +56,21 @@ program
       authToken: options.authToken || process.env.AUTH_TOKEN,
       timeoutMs: options.timeout
     });
+  });
+
+program
+  .command('version [microservicePath]')
+  .description('Actualiza la version de Maven, Gradle y/o Sonar.')
+  .requiredOption('--bump <tipo>', 'patch, minor o snapshot')
+  .action(async (microservicePath, options) => {
+    await runVersionCommand(microservicePath || process.cwd(), options.bump);
+  });
+
+program
+  .command('readme [microservicePath]')
+  .description('Genera o actualiza el README técnico del microservicio.')
+  .action(async (microservicePath) => {
+    await runReadmeCommand(microservicePath || process.cwd());
   });
 
 program.parseAsync(process.argv).catch((error) => {

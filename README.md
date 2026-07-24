@@ -106,6 +106,49 @@ El informe contiene el timestamp, microservicio, fase `PRE`, estado HTTP, tiempo
 
 Tras inicializar tareas desde el wizard, se ofrece automaticamente ejecutar esta baseline como siguiente paso.
 
+## Estación 1: Versionado y README técnico
+
+### Versionado
+
+Actualiza de forma consistente las versiones declaradas en `pom.xml`, `gradle.properties`, `build.gradle`, `build.gradle.kts` y/o `sonar-project.properties`:
+
+```bash
+migration-cli version --bump patch ./auth-service
+migration-cli version --bump minor ./auth-service
+migration-cli version --bump snapshot ./auth-service
+```
+
+Tipos de incremento:
+
+| Tipo | Ejemplo |
+| --- | --- |
+| `patch` | `1.0.0` → `1.0.1` |
+| `minor` | `1.0.0` → `1.1.0` |
+| `snapshot` | `1.0.0` → `1.0.1-SNAPSHOT` |
+
+La ruta es opcional y por defecto se usa el directorio actual. El comando rechaza versiones incompatibles o divergentes entre los archivos detectados antes de escribir cambios.
+
+### README técnico
+
+Genera o actualiza un README técnico en la raíz del microservicio:
+
+```bash
+migration-cli readme ./auth-service
+```
+
+El análisis detecta, cuando existen:
+
+- Java/Kotlin, Spring Boot y Maven/Gradle.
+- Controladores REST y mappings HTTP.
+- Entidades JPA y tablas.
+- Variables de entorno de archivos `.properties`, `.yml` y `.yaml`.
+- Persistencia JPA/Hibernate, MongoDB o R2DBC.
+- Kafka y RabbitMQ.
+
+El contenido generado incluye descripción, stack, endpoints, entidades, configuración e instrucciones de compilación y despliegue. Se delimita entre marcadores `migration-cli:readme`, por lo que las secciones manuales fuera de esos marcadores se conservan en ejecuciones posteriores.
+
+Tras la inicialización y la baseline opcional, el wizard ofrece preparar la Estación 1. Solicita la ruta, tipo de bump y una confirmación explícita antes de modificar archivos.
+
 ## Configuracion de Jira
 
 Copia `.env.example` a un archivo de entorno seguro o exporta las variables:
@@ -136,4 +179,4 @@ npm run lint
 npm test
 ```
 
-Los comandos validan sintaxis y ejecutan las pruebas automatizadas de Jira, la generacion local y el wizard.
+Los comandos validan sintaxis y ejecutan las pruebas automatizadas de Jira, baseline de endpoints, versionado, README técnico y wizard.

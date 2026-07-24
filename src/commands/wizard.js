@@ -4,6 +4,7 @@ const prompts = require('@clack/prompts');
 const pc = require('picocolors');
 const { runInitCommand } = require('./init');
 const { runPreMigrationEndpoints } = require('./endpoints');
+const { runStation1Preparation } = require('./station1');
 const { discoverEndpointSource } = require('../services/endpoints');
 const { JiraClient } = require('../services/jira');
 
@@ -141,14 +142,22 @@ async function runInteractiveWizard({
     initialValue: false
   });
 
-  if (isCancelled(shouldRunBaseline, promptApi) || !shouldRunBaseline) {
-    promptApi.outro(pc.green('Proceso finalizado.'));
-    return result;
+  let baselineResult;
+  if (isCancelled(shouldRunBaseline, promptApi)) {
+    return cancelWizard(promptApi);
   }
 
-  const baselineResult = await runEndpointsBaselineWizard({
-    microserviceName,
-    environment,
+  if (shouldRunBaseline) {
+    baselineResult = await runEndpointsBaselineWizard({
+      microserviceName,
+      environment,
+      currentDirectory,
+      promptApi,
+      output
+    });
+  }
+
+  const station1Result = await runStation1PreparationWizard({
     currentDirectory,
     promptApi,
     output
@@ -158,7 +167,8 @@ async function runInteractiveWizard({
 
   return {
     ...result,
-    baseline: baselineResult
+    ...(baselineResult ? { baseline: baselineResult } : {}),
+    ...(station1Result ? { station1: station1Result } : {})
   };
 }
 
@@ -229,6 +239,70 @@ async function runEndpointsBaselineWizard({
   });
 }
 
+async function runStation1PreparationWizard({
+  currentDirectory,
+  promptApi,
+  output,
+  runPreparation = runStation1Preparation
+}) {
+  const shouldPrepare = await promptApi.confirm({
+    message: 'Deseas preparar la Estacion 1 (versionado y README tecnico)?',
+    initialValue: false
+  });
+
+  if (isCancelled(shouldPrepare, promptApi) || !shouldPrepare) {
+    return undefined;
+  }
+
+  const projectDirectory = await promptApi.text({
+    message: 'Ruta del microservicio:',
+    initialValue: currentDirectory,
+    validate: (value) => value?.trim() ? undefined : 'Indica una ruta de proyecto.'
+  });
+
+  if (isCancelled(projectDirectory, promptApi)) {
+    return { mode: 'cancelled' };
+  }
+
+  const bumpType = await promptApi.select({
+    message: 'Tipo de incremento de version:',
+    options: [
+      { value: 'patch', label: 'Patch', hint: '1.0.0 → 1.0.1' },
+      { value: 'minor', label: 'Minor', hint: '1.0.0 → 1.1.0' },
+      { value: 'snapshot', label: 'Snapshot', hint: '1.0.0 → 1.0.1-SNAPSHOT' }
+    ]
+  });
+
+  if (isCancelled(bumpType, promptApi)) {
+    return { mode: 'cancelled' };
+  }
+
+  const confirmed = await promptApi.confirm({
+    message: `Confirmas actualizar la version (${bumpType}) y generar README?`,
+    initialValue: true
+  });
+
+  if (isCancelled(confirmed, promptApi) || !confirmed) {
+    return { mode: 'cancelled' };
+  }
+
+  const spinner = promptApi.spinner();
+  spinner.start('Actualizando version y generando README tecnico...');
+
+  try {
+    const result = await runPreparation(projectDirectory.trim(), bumpType, {
+      output
+    });
+    spinner.stop(
+      `Estacion 1 preparada: ${result.version.previousVersion} → ${result.version.nextVersion}`
+    );
+    return result;
+  } catch (error) {
+    spinner.stop('No se pudo preparar la Estacion 1.');
+    throw error;
+  }
+}
+
 function createProgressHandlers(spinner) {
   return {
     onParentStart: () => spinner.start('Conectando con Jira y creando tarea padre...'),
@@ -260,5 +334,6 @@ module.exports = {
   createProgressHandlers,
   runEndpointsBaselineWizard,
   runInteractiveWizard,
+  runStation1PreparationWizard,
   validateMicroserviceSlug
 };

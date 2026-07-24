@@ -1,0 +1,25 @@
+# Development and repository metadata
+.git/
+.gitattributes
+.gitignore
+.graphifyignore
+.graphify/
+.axetrules/
+
+# Local environment and editor files
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+
+# Tests and development assets
+test/
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# npm-generated archives
+*.tgz

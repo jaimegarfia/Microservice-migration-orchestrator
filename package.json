@@ -1,12 +1,12 @@
 {
   "name": "microservice-migration-orchestrator",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI to orchestrate end-to-end microservice migration workflows.",
   "license": "MIT",
   "type": "commonjs",
   "main": "src/index.js",
   "bin": {
-    "migration-cli": "./bin/migration-cli.js"
+    "migration-cli": "bin/migration-cli.js"
   },
   "engines": {
     "node": ">=18"

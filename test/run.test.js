@@ -18,6 +18,7 @@ test('pipeline continues after optional step failures and still writes the maste
     ],
     runInit: async () => ({ mode: 'local' }),
     runPre: async () => ({ reportPath: 'pre.json' }),
+    runRewrite: async () => ({ rewriterPath: 'rewriter.yml' }),
     runVersion: async () => {
       throw new Error('No se encontró un archivo de versión.');
     },

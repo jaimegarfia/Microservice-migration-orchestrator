@@ -6,7 +6,6 @@ const test = require('node:test');
 const {
   buildExecutionSummary,
   createProgressHandlers,
-  promptForJiraConfiguration,
   runEndpointsBaselineWizard,
   runInteractiveWizard,
   runTasksWizard,
@@ -82,8 +81,8 @@ test('main wizard launches the run pipeline from the zero-config menu', async ()
   assert.ok(promptApi.events.some(([type]) => type === 'outro'));
 });
 
-test('task wizard falls back to local checklist when Jira setup is declined', async () => {
-  const promptApi = createPromptApi({ confirm: [false, true] });
+test('task wizard falls back to local checklist when no Jira issue is provided', async () => {
+  const promptApi = createPromptApi({ text: '', confirm: true });
   const calls = [];
 
   const result = await runTasksWizard({
@@ -113,32 +112,34 @@ test('task wizard falls back to local checklist when Jira setup is declined', as
   ]);
 });
 
-test('Jira prompt validates temporary credentials without persisting them', async () => {
-  const promptApi = createPromptApi({
-    text: ['https://jira.example.com', 'MYPROJ'],
-    password: 'secret-token'
-  });
-  let receivedEnvironment;
+test('task wizard passes an existing Jira key to init without requesting credentials', async () => {
+  const promptApi = createPromptApi({ text: 'https://jira.example.com/browse/MYPROJ-123', confirm: true });
+  const calls = [];
 
-  const configured = await promptForJiraConfiguration({
-    environment: { EXISTING: 'value' },
+  const result = await runTasksWizard({
+    microserviceName: 'auth-service',
+    environment: {},
+    currentDirectory: '/workspace',
     promptApi,
-    jiraClientFactory: (environment) => {
-      receivedEnvironment = environment;
+    output: () => {},
+    runInit: async (name, options) => {
+      calls.push({ name, options });
       return {
-        validateConnection: async () => ({ key: 'MYPROJ', name: 'Migration' })
+        mode: 'jira-linked',
+        issueKey: 'MYPROJ-123',
+        envPath: '/workspace/.env'
       };
     }
   });
 
-  assert.equal(configured.JIRA_HOST, 'https://jira.example.com');
-  assert.equal(configured.JIRA_PROJECT_KEY, 'MYPROJ');
-  assert.equal(configured.JIRA_API_TOKEN, 'secret-token');
-  assert.equal(receivedEnvironment.EXISTING, 'value');
-  assert.deepEqual(promptApi.spinnerEvents, [
-    ['start', 'Validando conexión con Jira...'],
-    ['stop', 'Conectado a Jira: MYPROJ (Migration).']
-  ]);
+  assert.equal(result.mode, 'jira-linked');
+  assert.equal(calls[0].name, 'auth-service');
+  assert.equal(
+    calls[0].options.jiraIssueKey,
+    'https://jira.example.com/browse/MYPROJ-123'
+  );
+  assert.equal(calls[0].options.mode, 'auto');
+  assert.ok(promptApi.events.some((event) => String(event[2]).includes('No se crearán')));
 });
 
 test('endpoint source selector lets users choose among discovered definitions', async () => {
@@ -198,31 +199,26 @@ test('endpoint baseline wizard uses detected definition and password token', asy
   ]);
 });
 
-test('progress handlers communicate parent and subtask progress', () => {
+test('progress handlers communicate local checklist progress', () => {
   const events = [];
   const handlers = createProgressHandlers({
     start: (message) => events.push(['start', message]),
     stop: (message) => events.push(['stop', message])
   });
 
-  handlers.onParentStart();
-  handlers.onParentCreated({ parent: { key: 'MYPROJ-1' } });
-  handlers.onSubtaskStart({ index: 3, total: 8 });
-  handlers.onSubtaskCreated({
-    index: 3,
-    total: 8,
-    subtask: { key: 'MYPROJ-4' }
+  handlers.onLocalStart();
+  handlers.onLocalCreated({
+    historyPath: '/workspace/.axetrules/history/jira-tasks-auth-service.md'
   });
 
   assert.deepEqual(events, [
-    ['start', 'Conectando con Jira y creando tarea padre...'],
-    ['stop', 'Tarea padre creada: MYPROJ-1'],
-    ['start', 'Creando subtarea 3/8...'],
-    ['stop', 'Subtarea 3/8 creada: MYPROJ-4']
+    ['start', 'Generando checklist Markdown local...'],
+    ['stop', 'Checklist guardado en /workspace/.axetrules/history/jira-tasks-auth-service.md']
   ]);
 });
 
 test('execution summary states the operation destination', () => {
-  assert.match(buildExecutionSummary('auth-service', 'jira'), /en Jira/);
+  assert.match(buildExecutionSummary('auth-service', 'jira-linked'), /tarea Jira existente/);
   assert.match(buildExecutionSummary('auth-service', 'local'), /Markdown local/);
+  assert.match(buildExecutionSummary('auth-service', 'jira-linked'), /No se crearán/);
 });

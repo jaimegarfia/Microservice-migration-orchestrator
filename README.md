@@ -4,9 +4,9 @@
 [![Node.js](https://img.shields.io/node/v/microservice-migration-orchestrator.svg)](https://nodejs.org/)
 [![Licencia MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE)
 
-CLI en Node.js para orquestar una migración de microservicio mediante una **línea de producción por estaciones**. Centraliza la creación de tareas, evidencia de endpoints, versionado, documentación técnica, controles de calidad y el reporte final de migración.
+CLI en Node.js para orquestar una migración de microservicio mediante una **línea de producción por estaciones**. Centraliza la vinculación con Jira, evidencia de endpoints, versionado, documentación técnica, controles de calidad y el reporte final de migración.
 
-> El CLI realiza peticiones HTTP de lectura (`GET`) para validar endpoints. Las operaciones que modifican archivos o crean incidencias de Jira requieren una confirmación explícita en el asistente interactivo.
+> El CLI realiza peticiones HTTP de lectura (`GET`) para validar endpoints. `init` no crea incidencias ni subtareas: vincula una tarea Jira existente. `comment` publica evidencia explícita en dicha tarea.
 
 ## Contenido
 
@@ -77,13 +77,21 @@ migration-cli run ./auth-service \
 También puedes ejecutar cada estación individualmente:
 
 ```bash
-# Estación 0: crea tareas en Jira o un checklist Markdown local.
-migration-cli init auth-service
+# Estación 0: vincula una tarea Jira existente y genera el workflow de IDE.
+migration-cli init auth-service --jira-issue EVOLCRE4-1234
+
+# Tras confirmar cada gateway, publica la evidencia correspondiente en Jira.
+migration-cli comment 0 ./auth-service
+
+# Regenera exclusivamente el workflow para Axet, Cursor o Copilot.
+migration-cli workflow ./auth-service
 
 # Estación 0: toma la baseline de la API antes de migrar.
 migration-cli endpoints --pre auth-service --source docs/openapi.yaml
 
-# Estación 1: incrementa versión y genera documentación técnica.
+# Estación 1: convierte Maven si aplica, ejecuta OpenRewrite, incrementa versión y genera documentación.
+migration-cli maven-to-gradle ./auth-service
+migration-cli rewrite ./auth-service
 migration-cli version --bump patch ./auth-service
 migration-cli readme ./auth-service
 
@@ -112,9 +120,9 @@ migration-cli run [microservicePath] [opciones]
 
 Secuencia ejecutada:
 
-1. **Estación 0:** crea incidencias Jira cuando hay credenciales; si no, genera el checklist local.
+1. **Estación 0:** vincula la incidencia Jira indicada mediante `JIRA_ISSUE_KEY`/`--jira-issue`, o genera el checklist local si no existe una clave, y genera el workflow Markdown para IDEs asistidos por IA.
 2. **Estación 0:** detecta una definición OpenAPI, Swagger o Postman y genera la baseline PRE.
-3. **Estación 1:** incrementa la versión (`patch` por defecto) y genera el README técnico.
+3. **Estación 1:** convierte automáticamente Maven a Gradle si detecta `pom.xml` sin `build.gradle`, ejecuta OpenRewrite, incrementa la versión (`patch` por defecto) y genera el README técnico.
 4. **Estación 2:** ejecuta cobertura JaCoCo y consulta SonarQube.
 5. **Estación 3:** con `--post-base-url`, ejecuta POST, el motor de paridad y el resumen maestro.
 
@@ -144,30 +152,65 @@ Sin `--source`, el CLI explora la raíz del microservicio, `docs/` y `postman/` 
 
 | Estación | Objetivo | Comandos |
 | --- | --- | --- |
-| **0 — Preparación** | Crear las tareas de migración y preservar el contrato de API previo. | `init`, `endpoints --pre` |
-| **1 — Migración** | Versionar el microservicio y producir su README técnico. | `version`, `readme` |
+| **0 — Preparación** | Vincular la tarea Jira existente, generar el workflow de IDE y preservar el contrato de API previo. | `init --jira-issue`, `workflow`, `endpoints --pre`, `comment 0` |
+| **1 — Migración** | Convertir Maven a Gradle cuando aplique, ejecutar OpenRewrite, versionar el microservicio y producir su README técnico. | `maven-to-gradle`, `rewrite`, `version`, `readme` |
 | **2 — Calidad** | Evaluar cobertura JaCoCo y métricas de SonarQube. | `coverage`, `sonar` |
 | **3 — Paridad** | Probar la API migrada, comparar PRE/POST y consolidar el resultado. | `endpoints --post`, `summary` |
 | **4 — Entrega** | Desplegar en CUA/PRO y tramitar CAB. | Evidencia y proceso operativo externo |
 
 ### Estación 0 — Preparación
 
-`init` crea una tarea padre llamada `Migración Microservicio: <nombre>` y las ocho subtareas estándar:
+`init` **nunca crea tareas ni subtareas Jira**. Vincula una tarea existente a partir de una clave Jira o URL compleja y persiste solamente `JIRA_ISSUE_KEY` en `.env`, conservando el resto de variables y secretos:
 
-1. `[Estación 0] Pruebas endpoints pre-migración`
-2. `[Estación 1] Tareas pre-migración y migración`
-3. `[Estación 1] Post-migración y generación de README`
-4. `[Estación 2] Aumentar cobertura de tests (>60%)`
-5. `[Estación 2] Corrección de Code Smells y Bugs (Sonar)`
-6. `[Estación 3] Despliegue DEV y Superar Prisma`
-7. `[Estación 3] Pruebas endpoints post-migración`
-8. `[Estación 4] Despliegue CUA / PRO y documentación CAB`
+```bash
+migration-cli init auth-service --jira-issue EVOLCRE4-1234
+migration-cli init auth-service --jira-issue \
+  https://jira.example.com/browse/EVOLCRE4-1234
+```
 
-Con Jira configurado, las crea mediante `POST /rest/api/2/issue`. Sin configuración Jira, genera el checklist local:
+También puede definirse `JIRA_ISSUE_KEY` previamente en el entorno o en `.env`. Si no existe una incidencia vinculada, `init` genera el checklist local:
 
 ```text
 .axetrules/history/jira-tasks-<microservicio>.md
 ```
+
+Además, `init` genera o actualiza el workflow interactivo `micro-migration.md` para
+**Axet, Cursor, Copilot y otros IDEs asistidos por IA**. Si el proyecto ya contiene
+`.axet/`, se escribe en `.axet/skills/micro-migration.md`; de lo contrario se escribe
+en la raíz del microservicio. El workflow guía a la IA por las cuatro estaciones,
+incluye los puntos de parada para solicitar credenciales/confirmación de cutover y las
+revisiones requeridas de Java 17, Lombok, MapStruct, logging, Docker, JaCoCo y Sonar.
+
+Al completar cada estación, la IA **debe detenerse obligatoriamente**, solicitar la
+revisión y el commit del usuario, y esperar el mensaje literal `Continuar`. Sólo tras
+recibirlo ejecuta `migration-cli comment <0|1|2|3> .` para publicar la evidencia
+Markdown en la incidencia vinculada antes de avanzar a la siguiente estación.
+
+Puede regenerarse sin crear tareas ni checklist:
+
+```bash
+migration-cli workflow ./auth-service
+migration-cli workflow . --name auth-service
+```
+
+Durante `init`, el CLI también crea o actualiza `.gitignore` mediante un bloque
+gestionado e idempotente. Conserva todas las reglas previas del repositorio y protege
+archivos locales, credenciales, evidencias y artefactos de Axet:
+
+```gitignore
+# Migration Orchestrator & Axet IDE Ignored Files
+.env
+.env.local
+.env.*.local
+.axetrules/
+.axet/
+micro-migration.md
+rewriter.yml
+zordon/
+```
+
+El bloque se identifica con delimitadores `Migration Orchestrator & Axet IDE Ignored Files`;
+las ejecuciones posteriores lo actualizan sin duplicarlo ni modificar reglas ajenas.
 
 La baseline PRE ejecuta únicamente endpoints `GET`, conserva status, tiempo de respuesta, hash SHA-256 y un fragmento limitado de payload:
 
@@ -186,7 +229,47 @@ migration-cli endpoints --pre auth-service \
   --timeout 15000
 ```
 
-### Estación 1 — Versionado y README técnico
+### Estación 1 — Maven a Gradle, OpenRewrite, versionado y README técnico
+
+Cuando un proyecto contiene `pom.xml` y no tiene `build.gradle`, `migration-cli run`
+intenta la conversión Maven → Gradle automáticamente antes de OpenRewrite. También puede
+ejecutarse de forma explícita:
+
+```bash
+migration-cli maven-to-gradle ./auth-service
+```
+
+El conversor analiza coordenadas Maven, propiedades Java, dependencias, scopes,
+exclusiones, BOMs, repositorios y plugins. Genera `build.gradle` (Groovy),
+`gradle.properties`, `settings.gradle`, `gradle/sonar.gradle` y
+`gradle/googleArtifactory.gradle` cuando son necesarios. Incluye soporte para Spring
+Boot, JaCoCo, Failsafe/`integrationTest`, SonarQube y Google Artifact Registry.
+
+También instala el Gradle Wrapper completo y valida el resultado mediante
+`gradlew compileJava`. Por defecto conserva `pom.xml`, `.mvn/` y `target/` para una
+convivencia temporal de ambos sistemas. Una vez validada la transición, puede eliminarse
+Maven explícitamente:
+
+```bash
+migration-cli maven-to-gradle ./auth-service --cutover
+```
+
+`--cutover` elimina `pom.xml`, `.mvn/` y `target/` **sólo después** de que la validación
+Gradle haya finalizado correctamente.
+
+Para proyectos Gradle, ejecuta la receta `upgrade.zordon.carre4` mediante OpenRewrite:
+
+```bash
+migration-cli rewrite ./auth-service
+```
+
+El comando crea `rewriter.yml` si no existe, inyecta temporalmente el plugin
+`org.openrewrite.rewrite` `6.19.0`, la dependencia de receta y el bloque
+`activeRecipe("upgrade.zordon.carre4")`. A continuación ejecuta `gradlew rewriteRun`
+(`./gradlew` en Unix/macOS) y restaura la configuración temporal del build. Los cambios
+aplicados por OpenRewrite se conservan. Tras completarlo, continúa con la actualización
+a Java 17 y la fase post-migración. Puede sobrescribirse la dependencia de receta con
+`REWRITE_RECIPE_DEPENDENCY`.
 
 Incrementa versiones consistentes en `pom.xml`, `gradle.properties`, `build.gradle`, `build.gradle.kts` y/o `sonar-project.properties`:
 
@@ -264,10 +347,14 @@ El segundo argumento de `summary` es opcional; permite indicar la ruta del micro
 | Comando | Descripción |
 | --- | --- |
 | `migration-cli` | Inicia el asistente interactivo. |
-| `migration-cli init [microserviceName]` | Crea tareas Jira o checklist local. En TTY sin Jira ofrece configurarlo en vivo. Sin argumento inicia el asistente. |
+| `migration-cli init [microserviceName] --jira-issue <claveOUrl>` | Vincula una tarea Jira existente y guarda `JIRA_ISSUE_KEY`; sin clave genera checklist local. Sin argumento inicia el asistente. |
+| `migration-cli comment <stationNumber> [microservicePath]` | Publica la evidencia Markdown de la estación `0`, `1`, `2` o `3` en la tarea Jira vinculada. |
 | `migration-cli run [microservicePath]` | Pipeline One-Click Zero-Config de Estaciones 0 a 3, tolerante a fallos. |
+| `migration-cli workflow [microservicePath] [--name <microserviceName>]` | Genera o actualiza `micro-migration.md` para Axet y otros IDEs asistidos por IA. |
 | `migration-cli endpoints --pre <microserviceName>` | Captura la baseline de endpoints GET previa. |
 | `migration-cli endpoints --post <microserviceName>` | Ejecuta GET tras migración y analiza paridad. |
+| `migration-cli maven-to-gradle [microservicePath] [--cutover]` | Convierte Maven a Gradle, instala Wrapper y valida `compileJava`; `--cutover` elimina Maven tras validar. |
+| `migration-cli rewrite [microservicePath]` | Ejecuta la receta OpenRewrite `upgrade.zordon.carre4` en un proyecto Gradle. |
 | `migration-cli version --bump <tipo> [microservicePath]` | Actualiza versiones de build y Sonar. |
 | `migration-cli readme [microservicePath]` | Genera README técnico del microservicio. |
 | `migration-cli coverage [microservicePath]` | Ejecuta JaCoCo y evalúa cobertura. |
@@ -344,7 +431,8 @@ cp .env.example .env
 | Variable | Requerida | Descripción |
 | --- | --- | --- |
 | `JIRA_HOST` | Sí, para Jira | URL base de Jira, sin `/rest/api/2`. |
-| `JIRA_PROJECT_KEY` | Sí, para Jira | Clave del proyecto destino. |
+| `JIRA_PROJECT_KEY` | Sí, para Jira | Clave del proyecto destino; por defecto `EVOLCRE4`. |
+| `JIRA_ISSUE_KEY` | Sí, para `comment` | Clave de la tarea existente vinculada, por ejemplo `EVOLCRE4-1234`. `init --jira-issue` la persiste sin sobrescribir otras variables. |
 | `JIRA_AUTH_BASIC` | Una autenticación | Cabecera Basic codificada en Base64, con o sin prefijo `Basic `. |
 | `JIRA_API_TOKEN` | Una autenticación | Token Bearer si la instancia Jira lo acepta. |
 | `JIRA_ISSUE_TYPE` | No | Tipo de tarea padre; por defecto `Task`. |
@@ -357,7 +445,8 @@ export JIRA_HOST=https://jira.example.com
 export JIRA_PROJECT_KEY=MYPROJ
 export JIRA_AUTH_BASIC='Basic <credenciales-base64>'
 
-migration-cli init auth-service
+migration-cli init auth-service --jira-issue MYPROJ-1234
+migration-cli comment 0 ./auth-service
 ```
 
 ### Endpoints
@@ -365,8 +454,16 @@ migration-cli init auth-service
 | Variable | Descripción |
 | --- | --- |
 | `AUTH_TOKEN` | Token OAuth2/Bearer opcional para solicitudes GET. `--auth-token` tiene prioridad. |
+| `AUTH_PROVIDER` | Proveedor automático: `ATLAS`, `AGORA` o `CUSTOM`. |
+| `ATLAS_CLIENT_ID`, `ATLAS_CLIENT_SECRET` | Reservados para la configuración ATLAS del proyecto. |
+| `AGORA_CLIENT_ID`, `AGORA_CLIENT_SECRET` | Reservados para la configuración AGORA del proyecto. |
+| `ATLAS_TOKEN_URL`, `AGORA_TOKEN_URL` | Opcionales; sobrescriben la URL OAuth2 por defecto. |
+| `ATLAS_AUTH_BASIC`, `AGORA_AUTH_BASIC` | Opcionales; sobrescriben la cabecera Basic OAuth2 por defecto. |
 
-El token se envía sólo en la cabecera `Authorization`; nunca se persiste en la evidencia.
+Si no se proporciona `--auth-token` ni `AUTH_TOKEN`, el CLI obtiene un token OAuth2
+automáticamente cuando `AUTH_PROVIDER=ATLAS` o `AUTH_PROVIDER=AGORA`, y lo inyecta como
+`Authorization: Bearer <token>` en todos los GET PRE/POST. El token se envía sólo en
+cabecera y nunca se persiste en la evidencia.
 
 ### SonarQube
 
@@ -395,7 +492,8 @@ Toda la evidencia local se guarda bajo `.axetrules/history/`, directorio excluid
 
 | Artefacto | Productor | Contenido |
 | --- | --- | --- |
-| `jira-tasks-<servicio>.md` | `init` sin Jira | Tarea padre y checklist de subtareas. |
+| `.gitignore` (bloque gestionado) | `init` | Ignora credenciales, evidencia, workflows y artefactos locales de migración/Axet. |
+| `jira-tasks-<servicio>.md` | `init` sin incidencia vinculada | Checklist local de migración. |
 | `endpoints-pre.json` | `endpoints --pre` | Baseline de endpoints GET antes de migrar. |
 | `endpoints-post.json` | `endpoints --post` | Resultados GET sobre la API migrada. |
 | `parity-report.md` | `endpoints --post` | Comparativa PRE/POST y resultado de paridad. |
@@ -412,6 +510,10 @@ Ejecuta sin argumentos:
 migration-cli
 ```
 
+En `init`, si no existe `.env` ni `.env.example` en el directorio de trabajo, se crean
+ambos con la plantilla EVOLCRE4, Jira, proveedores ATLAS/AGORA y SonarQube. El CLI avisa
+de que los valores deben completarse antes de publicar comentarios remotos o capturar endpoints.
+
 El menú principal muestra:
 
 1. `🚀 Ejecutar Migración Completa` — inicia el pipeline `run`.
@@ -421,11 +523,16 @@ El menú principal muestra:
 5. `🧪 Cobertura y Calidad` — Estación 2.
 6. `❌ Salir`.
 
-Cuando faltan variables Jira y existe una TTY, el flujo de tareas pregunta si deseas configurarlo en ese momento. Solicita `JIRA_HOST`, `JIRA_PROJECT_KEY` y `JIRA_API_TOKEN` como contraseña oculta, valida el acceso al proyecto y usa las credenciales **sólo en memoria** para crear la tarea padre y sus subtareas. Si se rechaza la configuración, se cancela o falla la validación, genera el checklist Markdown local sin bloquear el flujo.
+La gestión de Jira se realiza de forma explícita: vincula la tarea existente con
+`init --jira-issue <clave-o-url>` y configura credenciales antes de ejecutar `comment`.
+No se crean tareas ni subtareas remotas. Si no hay una incidencia vinculada, `init`
+genera el checklist Markdown local sin bloquear el flujo.
 
-En CI/CD o terminales no interactivas no se solicitan datos: el comportamiento se mantiene determinista y usa el fallback local.
+En CI/CD o terminales no interactivas no se solicitan datos: el comportamiento se mantiene
+determinista y usa el fallback local.
 
-Usa confirmaciones explícitas antes de crear incidencias, modificar versiones, generar documentación o lanzar análisis.
+Usa confirmaciones explícitas antes de ejecutar `--cutover`, modificar versiones,
+generar documentación o lanzar análisis.
 
 ## Desarrollo
 
@@ -435,7 +542,7 @@ npm run lint
 npm test
 ```
 
-Los tests cubren integración de Jira, extracción y ejecución de endpoints, paridad PRE/POST, resumen maestro, versionado, generación de README, calidad JaCoCo/SonarQube y wizard.
+Los tests cubren integración de Jira, extracción y ejecución de endpoints, paridad PRE/POST, resumen maestro, versionado, generación de README, workflow Markdown para IDEs IA, calidad JaCoCo/SonarQube y wizard.
 
 Para probar el empaquetado antes de publicar:
 
@@ -446,6 +553,7 @@ npm pack --dry-run
 ## Seguridad
 
 - Los comandos de endpoints ejecutan sólo `GET`.
+- `init` gestiona un bloque idempotente de `.gitignore` para evitar subir secretos, evidencias y workflows locales.
 - Los tokens Jira, OAuth2 y SonarQube se usan en cabeceras HTTP y no se guardan en reportes.
 - No incluyas `.env`, credenciales, archivos de evidencia o artefactos de calidad en el repositorio.
 - Revisa los cambios de `version` y `readme` antes de subirlos a la rama del microservicio.

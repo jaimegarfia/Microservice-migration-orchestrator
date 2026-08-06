@@ -29,8 +29,23 @@ test('init writes and returns the local checklist when Jira is not configured', 
     });
 
     const savedChecklist = await readFile(result.historyPath, 'utf8');
+    const environmentTemplate = await readFile(
+      path.join(directory, '.env.example'),
+      'utf8'
+    );
+    const environmentFile = await readFile(path.join(directory, '.env'), 'utf8');
+    const gitIgnore = await readFile(path.join(directory, '.gitignore'), 'utf8');
 
     assert.equal(result.mode, 'local');
+    assert.equal(result.gitIgnore.created, true);
+    assert.equal(result.gitIgnore.updated, true);
+    assert.match(gitIgnore, /\.axetrules\//);
+    assert.match(gitIgnore, /\.axet\//);
+    assert.match(gitIgnore, /micro-migration\.md/);
+    assert.equal(result.environmentFiles.created, true);
+    assert.equal(environmentFile, environmentTemplate);
+    assert.match(environmentTemplate, /JIRA_PROJECT_KEY=EVOLCRE4/);
+    assert.match(environmentTemplate, /AUTH_PROVIDER=ATLAS/);
     assert.match(result.historyPath, /jira-tasks-payments-service\.md$/);
     assert.equal(savedChecklist, result.checklist);
     assert.match(savedChecklist, /Migración Microservicio: payments service/);
@@ -44,57 +59,31 @@ test('init writes and returns the local checklist when Jira is not configured', 
   }
 });
 
-test('Jira client creates a parent task followed by all standard subtasks', async () => {
+test('Jira client validates the configured project without creating issues', async () => {
   const requests = [];
-  let issueNumber = 100;
-
   const client = new JiraClient({
     host: 'https://jira.example.com/',
     projectKey: 'MYPROJ',
     authBasic: 'encoded-credentials',
     fetchImplementation: async (url, options) => {
       requests.push({ url, options });
-      issueNumber += 1;
-
-      return jsonResponse({
-        id: String(issueNumber),
-        key: `MYPROJ-${issueNumber}`,
-        self: `https://jira.example.com/rest/api/2/issue/${issueNumber}`
-      });
+      return jsonResponse({ key: 'MYPROJ', name: 'Migration Project' }, 200);
     }
   });
 
-  const parent = await client.createMigrationEpicOrTask('catalog');
-  const subtasks = await client.createSubtasks(parent.key);
+  const project = await client.validateConnection();
 
-  assert.equal(parent.key, 'MYPROJ-101');
-  assert.equal(subtasks.length, 8);
-  assert.equal(requests.length, 9);
-  assert.equal(requests[0].url, 'https://jira.example.com/rest/api/2/issue');
+  assert.deepEqual(project, { key: 'MYPROJ', name: 'Migration Project' });
+  assert.equal(requests.length, 1);
+  assert.equal(
+    requests[0].url,
+    'https://jira.example.com/rest/api/2/project/MYPROJ'
+  );
+  assert.equal(requests[0].options.method, undefined);
   assert.equal(requests[0].options.headers.Authorization, 'Basic encoded-credentials');
-
-  const parentPayload = JSON.parse(requests[0].options.body);
-  assert.deepEqual(parentPayload, {
-    fields: {
-      project: { key: 'MYPROJ' },
-      summary: 'Migración Microservicio: catalog',
-      issuetype: { name: 'Task' }
-    }
-  });
-
-  const firstSubtaskPayload = JSON.parse(requests[1].options.body);
-  assert.deepEqual(firstSubtaskPayload, {
-    fields: {
-      project: { key: 'MYPROJ' },
-      summary: STANDARD_SUBTASKS[0],
-      issuetype: { name: 'Sub-task' },
-      parent: { key: 'MYPROJ-101' }
-    }
-  });
-  assert.equal(subtasks[7].url, 'https://jira.example.com/browse/MYPROJ-109');
 });
 
-test('Jira client exposes a useful error when Jira rejects an issue', async () => {
+test('Jira client exposes a useful error when project validation is rejected', async () => {
   const client = new JiraClient({
     host: 'https://jira.example.com',
     projectKey: 'MYPROJ',
@@ -109,7 +98,7 @@ test('Jira client exposes a useful error when Jira rejects an issue', async () =
   });
 
   await assert.rejects(
-    () => client.createMigrationEpicOrTask('catalog'),
+    () => client.validateConnection(),
     (error) => {
       assert.ok(error instanceof JiraRequestError);
       assert.equal(error.status, 403);

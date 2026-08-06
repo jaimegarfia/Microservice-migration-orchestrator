@@ -4,12 +4,15 @@
 const { Command } = require('commander');
 const packageInfo = require('../package.json');
 const { runInitCommand } = require('../src/commands/init');
+const { runCommentCommand } = require('../src/commands/comment');
 const {
   runPreMigrationEndpoints,
   runPostMigrationEndpoints
 } = require('../src/commands/endpoints');
 const {
+  runMavenToGradleCommand,
   runReadmeCommand,
+  runRewriteCommand,
   runVersionCommand
 } = require('../src/commands/station1');
 const {
@@ -18,11 +21,9 @@ const {
 } = require('../src/commands/quality');
 const { runMigrationSummary } = require('../src/commands/summary');
 const { runMigrationPipeline } = require('../src/commands/run');
-const {
-  runInteractiveWizard,
-  runTasksWizard
-} = require('../src/commands/wizard');
-const { JiraClient, JiraRequestError } = require('../src/services/jira');
+const { runWorkflowCommand } = require('../src/commands/workflow');
+const { runInteractiveWizard } = require('../src/commands/wizard');
+const { JiraRequestError } = require('../src/services/jira');
 
 const program = new Command();
 
@@ -43,6 +44,7 @@ Ejemplos:
   $ migration-cli init auth-service
   $ migration-cli endpoints --pre auth-service --source docs/openapi.yaml
   $ migration-cli endpoints --post auth-service --base-url https://api-migrada.example.com
+  $ migration-cli rewrite ./auth-service
   $ migration-cli summary auth-service ./auth-service
 
 Consulta "migration-cli <comando> --help" para ver flags, ejemplos y variables de entorno.
@@ -52,8 +54,9 @@ Consulta "migration-cli <comando> --help" para ver flags, ejemplos y variables d
 program
   .command('init [microserviceName]')
   .description(
-    'Estación 0: crea la tarea de migración y sus ocho subtareas, o inicia el asistente.'
+    'Estación 0: vincula una tarea Jira existente o genera el checklist local.'
   )
+  .option('--jira-issue <claveOUrl>', 'Clave o URL de la tarea Jira existente que se debe vincular.')
   .addHelpText('after', `
 Ejemplos:
   $ migration-cli init auth-service
@@ -66,24 +69,33 @@ Variables de entorno Jira:
 Sin configuración Jira se genera:
   .axetrules/history/jira-tasks-<microservicio>.md
 `)
-  .action(async (microserviceName) => {
+  .action(async (microserviceName, options) => {
     if (!microserviceName) {
       await runWizard();
       return;
     }
 
-    if (process.stdout.isTTY && !JiraClient.isConfigured(process.env)) {
-      await runTasksWizard({
-        microserviceName,
-        currentDirectory: process.cwd(),
-        environment: process.env,
-        promptApi: require('@clack/prompts'),
-        output: console.log
-      });
-      return;
-    }
+    await runInitCommand(microserviceName, {
+      jiraIssueKey: options.jiraIssue
+    });
+  });
 
-    await runInitCommand(microserviceName);
+program
+  .command('comment <stationNumber> [microservicePath]')
+  .description('Publica la evidencia de una estación en la tarea Jira vinculada.')
+  .addHelpText('after', `
+Ejemplos:
+  $ migration-cli comment 0 ./auth-service
+  $ migration-cli comment 2 .
+
+Lee JIRA_ISSUE_KEY desde .env o el entorno, genera un comentario Markdown con la
+evidencia disponible de la estación y lo publica en Jira.
+`)
+  .action(async (stationNumber, microservicePath) => {
+    await runCommentCommand(stationNumber, {
+      currentDirectory: microservicePath || process.cwd(),
+      environment: process.env
+    });
   });
 
 program
@@ -136,7 +148,9 @@ Ejemplos:
   $ migration-cli endpoints --post auth-service --timeout 15000
 
 Usa exactamente una fase: --pre o --post.
-Variable soportada: AUTH_TOKEN (Bearer opcional, no se persiste).
+Autenticación: --auth-token tiene prioridad. Si no se indica token, AUTH_TOKEN se usa
+primero; con AUTH_PROVIDER=ATLAS o AUTH_PROVIDER=AGORA se solicita un token OAuth2.
+El token no se persiste.
 
 Artefactos:
   PRE:  .axetrules/history/<timestamp>/endpoints-pre.json
@@ -175,6 +189,61 @@ La ruta es opcional; por defecto se utiliza el directorio actual.
 `)
   .action(async (microservicePath, options) => {
     await runVersionCommand(microservicePath || process.cwd(), options.bump);
+  });
+
+program
+  .command('workflow [microservicePath]')
+  .description('Genera o actualiza el workflow Markdown para Axet y otros IDEs asistidos por IA.')
+  .option('--name <microserviceName>', 'Nombre del microservicio para incluir en el workflow.')
+  .addHelpText('after', `
+Ejemplos:
+  $ migration-cli workflow ./auth-service
+  $ migration-cli workflow . --name auth-service
+
+Escribe micro-migration.md en la raíz del proyecto, o en
+.axet/skills/micro-migration.md cuando existe la carpeta .axet.
+`)
+  .action(async (microservicePath, options) => {
+    await runWorkflowCommand(microservicePath || process.cwd(), {
+      microserviceName: options.name
+    });
+  });
+
+program
+  .command('maven-to-gradle [microservicePath]')
+  .description('Estación 1: convierte un proyecto Maven a Gradle conservando Maven durante la transición.')
+  .option('--cutover', 'Tras validar Gradle, elimina pom.xml, .mvn/ y target/.')
+  .addHelpText('after', `
+Ejemplos:
+  $ migration-cli maven-to-gradle ./auth-service
+  $ migration-cli maven-to-gradle ./auth-service --cutover
+
+Genera build.gradle, gradle.properties, settings.gradle, configuración Sonar/Artifact
+Registry cuando aplica y el Gradle Wrapper. Valida con gradlew compileJava.
+Por defecto pom.xml y .mvn/ se conservan para permitir convivencia temporal.
+`)
+  .action(async (microservicePath, options) => {
+    await runMavenToGradleCommand(microservicePath || process.cwd(), {
+      cutover: options.cutover
+    });
+  });
+
+program
+  .command('rewrite [microservicePath]')
+  .description('Estación 1: ejecuta la receta OpenRewrite upgrade.zordon.carre4 en un proyecto Gradle.')
+  .addHelpText('after', `
+Ejemplos:
+  $ migration-cli rewrite ./auth-service
+  $ migration-cli rewrite
+
+Crea rewriter.yml si no existe, inyecta temporalmente el plugin OpenRewrite 6.19.0,
+ejecuta gradlew rewriteRun y restaura la configuración temporal de build.
+Variable opcional: REWRITE_RECIPE_DEPENDENCY.
+`)
+  .action(async (microservicePath) => {
+    await runRewriteCommand(microservicePath || process.cwd(), {
+      environment: process.env
+    });
   });
 
 program

@@ -4,6 +4,8 @@ const path = require('node:path');
 const pc = require('picocolors');
 const { generateProjectReadme } = require('../services/readme');
 const { bumpProjectVersion } = require('../services/versioning');
+const { runOpenRewrite } = require('../services/rewrite');
+const { convertMavenToGradle } = require('../services/maven-to-gradle');
 
 async function runVersionCommand(projectDirectory, type, {
   output = console.log,
@@ -18,6 +20,42 @@ async function runVersionCommand(projectDirectory, type, {
     `${pc.dim('Archivos:')} ${result.updatedFiles
       .map((filePath) => path.basename(filePath))
       .join(', ')}`
+  );
+
+  return result;
+}
+
+async function runMavenToGradleCommand(projectDirectory, {
+  output = console.log,
+  convert = convertMavenToGradle,
+  ...options
+} = {}) {
+  const result = await convert(projectDirectory, { output, ...options });
+
+  output(pc.bold(pc.green('Conversión Maven → Gradle validada correctamente')));
+  output(
+    `${pc.dim('Build Gradle:')} ${result.generatedFiles.find((filePath) => filePath.endsWith('build.gradle'))}`
+  );
+  if (!result.cutover) {
+    output(pc.yellow('pom.xml se conserva hasta completar el cutover explícito.'));
+  }
+
+  return result;
+}
+
+async function runRewriteCommand(projectDirectory, {
+  output = console.log,
+  rewrite = runOpenRewrite,
+  ...options
+} = {}) {
+  const result = await rewrite(projectDirectory, { output, ...options });
+
+  output(pc.bold(pc.green('OpenRewrite ejecutado correctamente')));
+  output(`${pc.dim('Configuración:')} ${result.rewriterPath}`);
+  output(
+    pc.yellow(
+      'Continúa con la actualización a Java 17 y la fase post-migración.'
+    )
   );
 
   return result;
@@ -59,7 +97,9 @@ async function runStation1Preparation(projectDirectory, type, options = {}) {
 
 module.exports = {
   formatDetectedStack,
+  runMavenToGradleCommand,
   runReadmeCommand,
+  runRewriteCommand,
   runStation1Preparation,
   runVersionCommand
 };

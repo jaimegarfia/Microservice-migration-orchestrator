@@ -140,3 +140,6 @@ dist
 
 # Graphify analysis artifacts
 .graphify/
+
+# graphify-axet
+.graphify/

@@ -1,8 +1,15 @@
 'use strict';
 
 const path = require('node:path');
-const { mkdir, writeFile } = require('node:fs/promises');
-const { JiraClient } = require('../services/jira');
+const { mkdir, readFile, writeFile } = require('node:fs/promises');
+const pc = require('picocolors');
+const { extractJiraIssueKey } = require('../services/jira');
+const {
+  ensureEnvironmentFiles,
+  saveJiraIssueKey
+} = require('../services/environment');
+const { ensureGitIgnore } = require('../services/gitignore');
+const { generateMigrationWorkflow } = require('../services/workflow');
 const {
   buildMigrationChecklist,
   toHistoryFileName,
@@ -13,63 +20,99 @@ async function runInitCommand(microserviceName, {
   environment = process.env,
   currentDirectory = process.cwd(),
   output = console.log,
-  jiraClientFactory = JiraClient.fromEnvironment,
-  fileSystem = { mkdir, writeFile },
+  fileSystem = { mkdir, readFile, writeFile },
+  ensureEnvironment = ensureEnvironmentFiles,
+  ensureGitignore = ensureGitIgnore,
+  saveIssueKey = saveJiraIssueKey,
+  generateWorkflow = generateMigrationWorkflow,
+  jiraIssueKey,
   mode = 'auto',
   progress = {}
 } = {}) {
-  const serviceName = validateMicroserviceName(microserviceName);
-  const shouldUseJira =
-    mode === 'jira' || (mode === 'auto' && JiraClient.isConfigured(environment));
-
-  if (mode !== 'auto' && mode !== 'jira' && mode !== 'local') {
-    throw new Error('El modo de inicialización debe ser "auto", "jira" o "local".');
+  const serviceName = validateMicroserviceName(
+    microserviceName === '.'
+      ? path.basename(path.resolve(currentDirectory))
+      : microserviceName
+  );
+  const gitIgnore = await ensureGitignore(currentDirectory);
+  const environmentFiles = await ensureEnvironment(currentDirectory);
+  if (gitIgnore.updated) {
+    output(`Reglas de seguridad actualizadas en: ${gitIgnore.gitIgnorePath}`);
+  }
+  if (environmentFiles.created) {
+    output('');
+    output(pc.bold(pc.yellow('Configuración de entorno creada.')));
+    output(
+      pc.yellow(
+        `Completa los valores de ${environmentFiles.envPath} antes de capturar endpoints o publicar comentarios en Jira.`
+      )
+    );
   }
 
-  if (shouldUseJira) {
-    return createJiraIssues(serviceName, {
-      environment,
+  if (mode !== 'auto' && mode !== 'local') {
+    throw new Error('El modo de inicialización debe ser "auto" o "local".');
+  }
+
+  const fileEnvironment = await loadProjectEnvironment(currentDirectory, fileSystem);
+  const issueInput =
+    jiraIssueKey || environment.JIRA_ISSUE_KEY || fileEnvironment.JIRA_ISSUE_KEY;
+  const result = issueInput && mode !== 'local'
+    ? await linkExistingJiraIssue(issueInput, {
+      currentDirectory,
       output,
-      jiraClientFactory,
+      saveIssueKey
+    })
+    : await createLocalChecklist(serviceName, {
+      currentDirectory,
+      output,
+      fileSystem,
       progress
     });
-  }
 
-  return createLocalChecklist(serviceName, {
-    currentDirectory,
-    output,
-    fileSystem,
-    progress
-  });
+  const workflow = await generateWorkflow(currentDirectory, serviceName);
+  output(`Workflow para IDE generado en: ${workflow.workflowPath}`);
+
+  return { ...result, environmentFiles, gitIgnore, workflow };
 }
 
-async function createJiraIssues(
-  microserviceName,
-  { environment, output, jiraClientFactory, progress = {} }
-) {
-  const jiraClient = jiraClientFactory(environment);
+async function loadProjectEnvironment(currentDirectory, fileSystem) {
+  if (typeof fileSystem.readFile !== 'function') {
+    return {};
+  }
 
-  progress.onParentStart?.({ microserviceName });
-  output(`Creando tarea de migración para "${microserviceName}" en Jira...`);
-  const parent = await jiraClient.createMigrationEpicOrTask(microserviceName);
-  progress.onParentCreated?.({ parent });
+  try {
+    const content = await fileSystem.readFile(
+      path.join(currentDirectory, '.env'),
+      'utf8'
+    );
+    const match = /^JIRA_ISSUE_KEY=(.*)$/m.exec(content);
+    return { JIRA_ISSUE_KEY: match?.[1]?.trim() };
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return {};
+    }
+    throw new Error(
+      `No se pudo leer el archivo .env para resolver JIRA_ISSUE_KEY.`,
+      { cause: error }
+    );
+  }
+}
 
-  const subtasks = await jiraClient.createSubtasks(parent.key, {
-    onSubtaskStart: progress.onSubtaskStart,
-    onSubtaskCreated: progress.onSubtaskCreated
-  });
+async function linkExistingJiraIssue(issueInput, {
+  currentDirectory,
+  output,
+  saveIssueKey
+}) {
+  const issueKey = extractJiraIssueKey(issueInput);
+  const savedIssue = await saveIssueKey(issueKey, currentDirectory);
 
-  output('');
-  output('Tarea y subtareas creadas en Jira:');
-  output(`- Padre: ${parent.key} — ${parent.url}`);
-  subtasks.forEach((subtask) => {
-    output(`- Subtarea: ${subtask.key} — ${subtask.url}`);
-  });
+  output(`Migración vinculada a la tarea Jira existente: ${issueKey}`);
+  output(`JIRA_ISSUE_KEY guardada en: ${savedIssue.envPath}`);
 
   return {
-    mode: 'jira',
-    parent,
-    subtasks
+    mode: 'jira-linked',
+    issueKey,
+    envPath: savedIssue.envPath
   };
 }
 
@@ -104,6 +147,7 @@ async function createLocalChecklist(
 
 module.exports = {
   runInitCommand,
-  createJiraIssues,
+  loadProjectEnvironment,
+  linkExistingJiraIssue,
   createLocalChecklist
 };

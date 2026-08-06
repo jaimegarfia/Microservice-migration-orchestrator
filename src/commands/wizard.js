@@ -12,7 +12,6 @@ const { runStation2Quality } = require('./quality');
 const { runMigrationSummary } = require('./summary');
 const { runMigrationPipeline } = require('./run');
 const { discoverEndpointSources } = require('../services/endpoints');
-const { JiraClient } = require('../services/jira');
 
 const MICROSERVICE_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -29,21 +28,23 @@ function validateMicroserviceSlug(value) {
 }
 
 function buildExecutionSummary(microserviceName, mode) {
-  const destination = mode === 'jira' ? 'en Jira' : 'en un archivo Markdown local';
+  const destination = mode === 'jira-linked'
+    ? 'en una tarea Jira existente'
+    : 'en un archivo Markdown local';
   return [
     `Microservicio: ${microserviceName}`,
     `Destino: ${destination}`,
-    'Se creara 1 tarea padre y 8 subtareas estandar.'
+    'No se crearán tareas ni subtareas de Jira.'
   ].join('\n');
 }
 
 function buildSuccessPanel(result) {
-  if (result.mode === 'jira') {
+  if (result.mode === 'jira-linked') {
     return [
-      pc.bold(pc.green('Tareas de migracion creadas correctamente')),
+      pc.bold(pc.green('Tarea Jira vinculada correctamente')),
       '',
-      `Padre: ${result.parent.key} - ${result.parent.url}`,
-      ...result.subtasks.map((subtask) => `Subtarea: ${subtask.key} - ${subtask.url}`)
+      `Incidencia: ${result.issueKey}`,
+      `Configuración: ${result.envPath}`
     ].join('\n');
   }
 
@@ -169,36 +170,21 @@ async function runTasksWizard({
   currentDirectory,
   promptApi,
   output,
-  runInit = runInitCommand,
-  jiraClientFactory = JiraClient.fromEnvironment
+  runInit = runInitCommand
 }) {
-  let runtimeEnvironment = environment;
-  let mode = 'auto';
-
-  if (!JiraClient.isConfigured(environment)) {
-    const configureJira = await promptApi.confirm({
-      message: '⚠️ No se detectó configuración de Jira. ¿Deseas configurarla ahora para crear la Epic y subtareas?',
-      initialValue: true
-    });
-    if (isCancelled(configureJira, promptApi)) {
-      return { mode: 'cancelled' };
-    }
-
-    if (configureJira) {
-      runtimeEnvironment = await promptForJiraConfiguration({
-        environment, promptApi, jiraClientFactory
-      });
-      if (!runtimeEnvironment) {
-        mode = 'local';
-      } else {
-        mode = 'jira';
-      }
-    } else {
-      mode = 'local';
-    }
+  const jiraIssueKey = await promptApi.text({
+    message: 'Clave o URL de la tarea Jira existente (opcional):',
+    placeholder: 'EVOLCRE4-1234 o https://jira.example.com/browse/EVOLCRE4-1234'
+  });
+  if (isCancelled(jiraIssueKey, promptApi)) {
+    return { mode: 'cancelled' };
   }
 
-  promptApi.note(buildExecutionSummary(microserviceName, mode === 'auto' ? 'jira' : mode), 'Resumen');
+  const mode = jiraIssueKey?.trim() || environment.JIRA_ISSUE_KEY
+    ? 'jira-linked'
+    : 'local';
+  promptApi.note(buildExecutionSummary(microserviceName, mode), 'Resumen');
+
   const confirmed = await promptApi.confirm({
     message: '¿Confirmas la ejecución?',
     initialValue: true
@@ -209,58 +195,15 @@ async function runTasksWizard({
 
   const spinner = promptApi.spinner();
   const result = await runInit(microserviceName, {
-    environment: runtimeEnvironment,
+    environment,
     currentDirectory,
-    mode,
+    jiraIssueKey: jiraIssueKey?.trim() || undefined,
+    mode: mode === 'local' ? 'local' : 'auto',
     output,
     progress: createProgressHandlers(spinner)
   });
   promptApi.note(buildSuccessPanel(result), 'Inicialización completada');
   return result;
-}
-
-async function promptForJiraConfiguration({
-  environment,
-  promptApi,
-  jiraClientFactory = JiraClient.fromEnvironment
-}) {
-  const host = await promptApi.text({
-    message: 'JIRA_HOST:',
-    placeholder: 'https://jira.example.com',
-    validate: (value) => value?.trim() ? undefined : 'JIRA_HOST es obligatorio.'
-  });
-  const projectKey = await promptApi.text({
-    message: 'JIRA_PROJECT_KEY:',
-    placeholder: 'MYPROJ',
-    validate: (value) => value?.trim() ? undefined : 'JIRA_PROJECT_KEY es obligatorio.'
-  });
-  const token = await promptApi.password({
-    message: 'JIRA_API_TOKEN:',
-    validate: (value) => value?.trim() ? undefined : 'JIRA_API_TOKEN es obligatorio.'
-  });
-
-  if ([host, projectKey, token].some((value) => isCancelled(value, promptApi))) {
-    return undefined;
-  }
-
-  const runtimeEnvironment = {
-    ...environment,
-    JIRA_HOST: host.trim(),
-    JIRA_PROJECT_KEY: projectKey.trim(),
-    JIRA_API_TOKEN: token.trim()
-  };
-
-  const spinner = promptApi.spinner();
-  spinner.start('Validando conexión con Jira...');
-  try {
-    const project = await jiraClientFactory(runtimeEnvironment).validateConnection();
-    spinner.stop(`Conectado a Jira: ${project.key}${project.name ? ` (${project.name})` : ''}.`);
-    return runtimeEnvironment;
-  } catch (error) {
-    spinner.stop('No se pudo validar Jira; se usará checklist local.');
-    promptApi.note(error.message, 'Conexión Jira');
-    return undefined;
-  }
 }
 
 async function runEndpointsBaselineWizard({
@@ -483,11 +426,6 @@ function createEndpointProgressHandlers(spinner) {
 
 function createProgressHandlers(spinner) {
   return {
-    onParentStart: () => spinner.start('Conectando con Jira y creando tarea padre...'),
-    onParentCreated: ({ parent }) => spinner.stop(`Tarea padre creada: ${parent.key}`),
-    onSubtaskStart: ({ index, total }) => spinner.start(`Creando subtarea ${index}/${total}...`),
-    onSubtaskCreated: ({ index, total, subtask }) =>
-      spinner.stop(`Subtarea ${index}/${total} creada: ${subtask.key}`),
     onLocalStart: () => spinner.start('Generando checklist Markdown local...'),
     onLocalCreated: ({ historyPath }) => spinner.stop(`Checklist guardado en ${historyPath}`)
   };
@@ -508,7 +446,6 @@ module.exports = {
   buildSuccessPanel,
   createEndpointProgressHandlers,
   createProgressHandlers,
-  promptForJiraConfiguration,
   runEndpointsBaselineWizard,
   runInteractiveWizard,
   runStation1PreparationWizard,

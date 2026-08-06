@@ -1,6 +1,7 @@
 'use strict';
 
 const pc = require('picocolors');
+const { resolveEndpointAuthToken } = require('../services/authentication');
 const {
   EndpointSourceError,
   createBaselineReport,
@@ -24,10 +25,12 @@ const { validateMicroserviceName } = require('../utils/checklist');
 async function runPreMigrationEndpoints(microserviceName, {
   source,
   baseUrl,
-  authToken = process.env.AUTH_TOKEN,
+  authToken,
+  environment = process.env,
   currentDirectory = process.cwd(),
   output = console.log,
   fetchImplementation = globalThis.fetch,
+  resolveAuthToken = resolveEndpointAuthToken,
   progress = {},
   timeoutMs
 } = {}) {
@@ -49,8 +52,13 @@ async function runPreMigrationEndpoints(microserviceName, {
     total: endpoints.length
   });
 
-  const results = await executeGetEndpoints(endpoints, {
+  const resolvedAuthToken = await resolveAuthToken({
     authToken,
+    environment,
+    fetchImplementation
+  });
+  const results = await executeGetEndpoints(endpoints, {
+    authToken: resolvedAuthToken,
     fetchImplementation,
     timeoutMs,
     onEndpointStart: progress.onEndpointStart,
@@ -75,10 +83,12 @@ async function runPostMigrationEndpoints(microserviceName, options = {}) {
   const {
     source,
     baseUrl,
-    authToken = process.env.AUTH_TOKEN,
+    authToken,
+    environment = process.env,
     currentDirectory = process.cwd(),
     output = console.log,
     fetchImplementation = globalThis.fetch,
+    resolveAuthToken = resolveEndpointAuthToken,
     progress = {},
     timeoutMs,
     findPreReport = findLatestPreReport,
@@ -108,8 +118,13 @@ async function runPostMigrationEndpoints(microserviceName, options = {}) {
     phase: 'POST'
   });
 
-  const results = await executeGetEndpoints(endpoints, {
+  const resolvedAuthToken = await resolveAuthToken({
     authToken,
+    environment,
+    fetchImplementation
+  });
+  const results = await executeGetEndpoints(endpoints, {
+    authToken: resolvedAuthToken,
     fetchImplementation,
     timeoutMs,
     onEndpointStart: progress.onEndpointStart,

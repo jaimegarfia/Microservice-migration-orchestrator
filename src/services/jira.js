@@ -1,9 +1,6 @@
 'use strict';
 
-const {
-  STANDARD_SUBTASKS,
-  validateMicroserviceName
-} = require('../utils/checklist');
+const { DEFAULT_JIRA_PROJECT_KEY } = require('./environment');
 
 class JiraConfigurationError extends Error {
   constructor(message) {
@@ -27,15 +24,11 @@ class JiraClient {
     projectKey,
     authBasic,
     apiToken,
-    issueType = 'Task',
-    subtaskIssueType = 'Sub-task',
     fetchImplementation = globalThis.fetch
   }) {
     this.host = normalizeHost(host);
     this.projectKey = requiredValue(projectKey, 'JIRA_PROJECT_KEY');
     this.authorization = buildAuthorization({ authBasic, apiToken });
-    this.issueType = issueType;
-    this.subtaskIssueType = subtaskIssueType;
     this.fetch = fetchImplementation;
 
     if (typeof this.fetch !== 'function') {
@@ -48,18 +41,16 @@ class JiraClient {
   static fromEnvironment(environment = process.env) {
     return new JiraClient({
       host: environment.JIRA_HOST,
-      projectKey: environment.JIRA_PROJECT_KEY,
+      projectKey: environment.JIRA_PROJECT_KEY || DEFAULT_JIRA_PROJECT_KEY,
       authBasic: environment.JIRA_AUTH_BASIC,
-      apiToken: environment.JIRA_API_TOKEN,
-      issueType: environment.JIRA_ISSUE_TYPE || 'Task',
-      subtaskIssueType: environment.JIRA_SUBTASK_ISSUE_TYPE || 'Sub-task'
+      apiToken: environment.JIRA_API_TOKEN
     });
   }
 
   static isConfigured(environment = process.env) {
     return Boolean(
-      environment.JIRA_HOST &&
-        environment.JIRA_PROJECT_KEY &&
+        environment.JIRA_HOST &&
+        (environment.JIRA_PROJECT_KEY || DEFAULT_JIRA_PROJECT_KEY) &&
         (environment.JIRA_AUTH_BASIC || environment.JIRA_API_TOKEN)
     );
   }
@@ -92,87 +83,29 @@ class JiraClient {
     };
   }
 
-  async createMigrationEpicOrTask(microserviceName) {
-    const serviceName = validateMicroserviceName(microserviceName);
-
-    return this.createIssue({
-      summary: `Migración Microservicio: ${serviceName}`,
-      issueType: this.issueType
-    });
-  }
-
-  async createSubtasks(
-    parentKey,
-    { onSubtaskStart = () => {}, onSubtaskCreated = () => {} } = {}
-  ) {
-    if (typeof parentKey !== 'string' || !parentKey.trim()) {
-      throw new Error('La clave de la tarea padre de Jira es obligatoria.');
+  async postJiraComment(issueKey, commentMarkdown) {
+    const key = extractJiraIssueKey(issueKey);
+    if (typeof commentMarkdown !== 'string' || !commentMarkdown.trim()) {
+      throw new JiraConfigurationError('El comentario de Jira no puede estar vacío.');
     }
 
-    const createdSubtasks = [];
-
-    for (const [index, summary] of STANDARD_SUBTASKS.entries()) {
-      try {
-        onSubtaskStart({
-          index: index + 1,
-          total: STANDARD_SUBTASKS.length,
-          summary
-        });
-
-        const subtask = await this.createIssue({
-          summary,
-          issueType: this.subtaskIssueType,
-          parentKey: parentKey.trim()
-        });
-
-        createdSubtasks.push(subtask);
-        onSubtaskCreated({
-          index: index + 1,
-          total: STANDARD_SUBTASKS.length,
-          summary,
-          subtask
-        });
-      } catch (error) {
-        throw new JiraRequestError(
-          `No se pudieron crear todas las subtareas. Se crearon ${createdSubtasks.length} de ${STANDARD_SUBTASKS.length}.`,
-          {
-            cause: error,
-            status: error.status,
-            responseBody: error.responseBody
-          }
-        );
+    const response = await this.fetch(
+      `${this.host}/rest/api/2/issue/${encodeURIComponent(key)}/comment`,
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: this.authorization
+        },
+        body: JSON.stringify({ body: commentMarkdown.trim() })
       }
-    }
-
-    return createdSubtasks;
-  }
-
-  async createIssue({ summary, issueType, parentKey }) {
-    const fields = {
-      project: { key: this.projectKey },
-      summary,
-      issuetype: { name: issueType }
-    };
-
-    if (parentKey) {
-      fields.parent = { key: parentKey };
-    }
-
-    const response = await this.fetch(`${this.host}/rest/api/2/issue`, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Authorization: this.authorization
-      },
-      body: JSON.stringify({ fields })
-    });
-
+    );
     const responseBody = await parseResponseBody(response);
 
     if (!response.ok) {
       throw new JiraRequestError(
-        `Jira rechazó la creación de la incidencia (${response.status}): ${getJiraErrorMessage(responseBody)}`,
+        `Jira rechazó la publicación del comentario (${response.status}): ${getJiraErrorMessage(responseBody)}`,
         {
           status: response.status,
           responseBody
@@ -180,20 +113,49 @@ class JiraClient {
       );
     }
 
-    if (!responseBody || !responseBody.key) {
-      throw new JiraRequestError(
-        'Jira respondió correctamente, pero no incluyó la clave de la incidencia creada.',
-        { status: response.status, responseBody }
-      );
-    }
-
     return {
-      id: responseBody.id,
-      key: responseBody.key,
-      self: responseBody.self,
-      url: `${this.host}/browse/${encodeURIComponent(responseBody.key)}`
+      id: responseBody?.id,
+      issueKey: key,
+      body: commentMarkdown.trim(),
+      self: responseBody?.self
     };
   }
+
+}
+
+function extractJiraIssueKey(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new JiraConfigurationError(
+      'Debes indicar una clave o URL de incidencia Jira (por ejemplo EVOLCRE4-1234).'
+    );
+  }
+
+  const candidate = value.trim();
+  const directMatch = /^([A-Za-z][A-Za-z0-9_]*-\d+)$/i.exec(candidate);
+  if (directMatch) {
+    return directMatch[1].toUpperCase();
+  }
+
+  try {
+    const url = new URL(candidate);
+    const match = /(?:browse|issue|issues)\/([A-Za-z][A-Za-z0-9_]*-\d+)(?:[/?#]|$)/i
+      .exec(`${url.pathname}${url.search}${url.hash}`);
+    if (match) {
+      return match[1].toUpperCase();
+    }
+  } catch {
+    // A non-URL must be a valid Jira key and is handled by the error below.
+  }
+
+  const embeddedMatch = /(?:^|[/?#=&])([A-Za-z][A-Za-z0-9_]*-\d+)(?:$|[/?#&])/i
+    .exec(candidate);
+  if (embeddedMatch) {
+    return embeddedMatch[1].toUpperCase();
+  }
+
+  throw new JiraConfigurationError(
+    `No se pudo extraer JIRA_ISSUE_KEY de "${candidate}".`
+  );
 }
 
 function normalizeHost(host) {
@@ -269,6 +231,7 @@ function getJiraErrorMessage(responseBody) {
 }
 
 module.exports = {
+  extractJiraIssueKey,
   JiraClient,
   JiraConfigurationError,
   JiraRequestError

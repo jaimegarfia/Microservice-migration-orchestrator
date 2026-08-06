@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('node:path');
+const { access } = require('node:fs/promises');
 const pc = require('picocolors');
 const { runInitCommand } = require('./init');
 const {
@@ -8,7 +9,9 @@ const {
   runPostMigrationEndpoints
 } = require('./endpoints');
 const {
+  runMavenToGradleCommand,
   runReadmeCommand,
+  runRewriteCommand,
   runVersionCommand
 } = require('./station1');
 const {
@@ -34,6 +37,8 @@ async function runMigrationPipeline(microservicePath = process.cwd(), {
   runInit = runInitCommand,
   runPre = runPreMigrationEndpoints,
   runPost = runPostMigrationEndpoints,
+  runMavenToGradle = runMavenToGradleCommand,
+  runRewrite = runRewriteCommand,
   runVersion = runVersionCommand,
   runReadme = runReadmeCommand,
   runCoverage = runCoverageCommand,
@@ -79,6 +84,7 @@ async function runMigrationPipeline(microservicePath = process.cwd(), {
         source: resolvedSource,
         baseUrl,
         authToken,
+        environment,
         currentDirectory,
         output,
         timeoutMs
@@ -88,6 +94,24 @@ async function runMigrationPipeline(microservicePath = process.cwd(), {
     );
   }
 
+  if (await needsMavenToGradleConversion(projectDirectory)) {
+    result.stations.mavenToGradle = await runOptionalStep(
+      'Estación 1 — conversión Maven a Gradle',
+      () => runMavenToGradle(projectDirectory, { output }),
+      result,
+      output
+    );
+  }
+
+  result.stations.rewrite = await runOptionalStep(
+    'Estación 1 — OpenRewrite',
+    () => runRewrite(projectDirectory, {
+      environment,
+      output
+    }),
+    result,
+    output
+  );
   result.stations.version = await runOptionalStep(
     'Estación 1 — versionado',
     () => runVersion(projectDirectory, bumpType, { output }),
@@ -128,6 +152,7 @@ async function runMigrationPipeline(microservicePath = process.cwd(), {
         source: resolvedSource,
         baseUrl: postBaseUrl,
         authToken,
+        environment,
         currentDirectory,
         output,
         timeoutMs
@@ -156,6 +181,24 @@ async function runMigrationPipeline(microservicePath = process.cwd(), {
 
   printPipelineSummary(result, output);
   return result;
+}
+
+async function needsMavenToGradleConversion(projectDirectory) {
+  const [hasPom, hasGradleBuild] = await Promise.all([
+    pathExists(path.join(projectDirectory, 'pom.xml')),
+    pathExists(path.join(projectDirectory, 'build.gradle'))
+  ]);
+
+  return hasPom && !hasGradleBuild;
+}
+
+async function pathExists(filePath) {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function resolvePipelineSource(source, projectDirectory, {
@@ -228,6 +271,7 @@ function printPipelineSummary(result, output) {
 module.exports = {
   DEFAULT_BUMP_TYPE,
   addWarning,
+  needsMavenToGradleConversion,
   printPipelineSummary,
   resolvePipelineSource,
   runMigrationPipeline,

@@ -9,7 +9,7 @@ const {
   SummaryError
 } = require('../services/summary');
 
-const STATION_NUMBERS = new Set(['0', '1', '2', '3']);
+const STATION_NUMBERS = new Set(['0', '1', '2', '3', '4']);
 
 async function runCommentCommand(stationNumber, {
   currentDirectory = process.cwd(),
@@ -92,11 +92,16 @@ async function buildStationComment(station, {
         `- JaCoCo: ${formatQualityGate(evidence?.quality?.coverage?.qualityGate)}.`,
         `- SonarQube: ${formatSonarGate(evidence?.quality?.sonar?.qualityGate)}.`
       ]
-      : [
-        `- Baseline PRE: ${evidence?.endpoints.pre ? 'disponible' : 'no disponible'}.`,
-        `- Resultados POST: ${evidence?.endpoints.post ? 'disponibles' : 'no disponibles'}.`,
-        `- Reporte de paridad: ${evidence?.endpoints.parityMarkdown ? 'disponible' : 'no disponible'}.`
-      ];
+      : station === '3'
+        ? [
+          `- Baseline PRE: ${evidence?.endpoints.pre ? 'disponible' : 'no disponible'}.`,
+          `- Resultados POST: ${evidence?.endpoints.post ? 'disponibles' : 'no disponibles'}.`,
+          `- Reporte de paridad: ${evidence?.endpoints.parityMarkdown ? 'disponible' : 'no disponible'}.`
+        ]
+        : [
+          `- Resumen maestro: ${evidence?.summary ? 'disponible' : 'no disponible'}.`,
+          '- Evidencia CAB: revisar y adjuntar el resumen maestro a la documentación de entrega.'
+        ];
 
   return [
     title,
@@ -111,7 +116,7 @@ async function buildStationComment(station, {
 function validateStationNumber(stationNumber) {
   const station = String(stationNumber || '').trim();
   if (!STATION_NUMBERS.has(station)) {
-    throw new Error('La estación debe ser 0, 1, 2 o 3.');
+    throw new Error('La estación debe ser 0, 1, 2, 3 o 4.');
   }
   return station;
 }

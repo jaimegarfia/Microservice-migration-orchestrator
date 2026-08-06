@@ -62,11 +62,11 @@ Ejemplos:
   $ migration-cli init auth-service
   $ migration-cli init
 
-Variables de entorno Jira:
+Variables de entorno Jira para publicar comentarios:
   JIRA_HOST, JIRA_PROJECT_KEY y JIRA_AUTH_BASIC o JIRA_API_TOKEN.
-  Opcionales: JIRA_ISSUE_TYPE y JIRA_SUBTASK_ISSUE_TYPE.
+  JIRA_ISSUE_KEY puede declararse en .env o indicarse con --jira-issue.
 
-Sin configuración Jira se genera:
+Sin una incidencia vinculada se genera:
   .axetrules/history/jira-tasks-<microservicio>.md
 `)
   .action(async (microserviceName, options) => {
@@ -87,9 +87,10 @@ program
 Ejemplos:
   $ migration-cli comment 0 ./auth-service
   $ migration-cli comment 2 .
+  $ migration-cli comment 4 .
 
-Lee JIRA_ISSUE_KEY desde .env o el entorno, genera un comentario Markdown con la
-evidencia disponible de la estación y lo publica en Jira.
+Acepta estaciones de 0 a 4. Lee JIRA_ISSUE_KEY desde .env o el entorno, genera un
+comentario Markdown con la evidencia disponible de la estación y lo publica en Jira.
 `)
   .action(async (stationNumber, microservicePath) => {
     await runCommentCommand(stationNumber, {
@@ -113,8 +114,9 @@ Ejemplos:
   $ migration-cli run ./auth-service --post-base-url https://api-migrada.example.com
   $ migration-cli run ./auth-service --source docs/openapi.yaml --bump minor
 
-El pipeline detecta definición API, genera tareas Jira o checklist local, ejecuta
-PRE, versionado, README, cobertura, SonarQube, POST opcional y resumen maestro.
+El pipeline detecta definición API, vincula una tarea Jira existente o genera un
+checklist local, ejecuta PRE, versionado, README, cobertura, SonarQube, POST opcional
+y resumen maestro.
 Los fallos no críticos se registran como [WARNING] y no detienen el flujo.
 `)
   .action(async (microservicePath, options) => {
@@ -200,8 +202,8 @@ Ejemplos:
   $ migration-cli workflow ./auth-service
   $ migration-cli workflow . --name auth-service
 
-Escribe micro-migration.md en la raíz del proyecto, o en
-.axet/skills/micro-migration.md cuando existe la carpeta .axet.
+Escribe el workflow en:
+  .axetrules/workflows/micro-migration.md
 `)
   .action(async (microservicePath, options) => {
     await runWorkflowCommand(microservicePath || process.cwd(), {

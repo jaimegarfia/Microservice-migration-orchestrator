@@ -1,8 +1,7 @@
 'use strict';
 
 const path = require('node:path');
-const { access, mkdir, readFile, writeFile } = require('node:fs/promises');
-const { constants } = require('node:fs');
+const { mkdir, readFile, writeFile } = require('node:fs/promises');
 
 const WORKFLOW_FILE_NAME = 'micro-migration.md';
 const TEMPLATE_PATH = path.resolve(
@@ -20,7 +19,7 @@ class WorkflowError extends Error {
 }
 
 async function generateMigrationWorkflow(projectDirectory, microserviceName, {
-  fileSystem = { access, mkdir, readFile, writeFile },
+  fileSystem = { mkdir, readFile, writeFile },
   templatePath = TEMPLATE_PATH
 } = {}) {
   const directory = path.resolve(projectDirectory || process.cwd());
@@ -37,7 +36,7 @@ async function generateMigrationWorkflow(projectDirectory, microserviceName, {
     );
   }
 
-  const content = renderMigrationWorkflow(template, serviceName);
+  const content = renderMigrationWorkflow(template, serviceName, directory);
   await fileSystem.mkdir(path.dirname(workflowPath), { recursive: true });
   await fileSystem.writeFile(workflowPath, content, 'utf8');
 
@@ -49,23 +48,25 @@ async function generateMigrationWorkflow(projectDirectory, microserviceName, {
   };
 }
 
-function renderMigrationWorkflow(template, microserviceName) {
+function renderMigrationWorkflow(template, microserviceName, microservicePath = process.cwd()) {
   if (!template.includes('{{MICROSERVICE_NAME}}')) {
     throw new WorkflowError(
       'La plantilla del workflow no contiene el marcador {{MICROSERVICE_NAME}}.'
     );
   }
 
-  return template.replaceAll('{{MICROSERVICE_NAME}}', microserviceName);
+  return template
+    .replaceAll('{{MICROSERVICE_NAME}}', microserviceName)
+    .replaceAll('{{MICROSERVICE_PATH}}', path.resolve(microservicePath));
 }
 
-async function resolveWorkflowPath(projectDirectory, fileSystem = { access }) {
-  const axetDirectory = path.join(projectDirectory, '.axet');
-  const hasAxetDirectory = await pathExists(axetDirectory, fileSystem);
-
-  return hasAxetDirectory
-    ? path.join(axetDirectory, 'skills', WORKFLOW_FILE_NAME)
-    : path.join(projectDirectory, WORKFLOW_FILE_NAME);
+async function resolveWorkflowPath(projectDirectory) {
+  return path.join(
+    projectDirectory,
+    '.axetrules',
+    'workflows',
+    WORKFLOW_FILE_NAME
+  );
 }
 
 function normalizeMicroserviceName(microserviceName, projectDirectory) {
@@ -79,22 +80,12 @@ function normalizeMicroserviceName(microserviceName, projectDirectory) {
   return candidate;
 }
 
-async function pathExists(filePath, fileSystem) {
-  try {
-    await fileSystem.access(filePath, constants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 module.exports = {
   TEMPLATE_PATH,
   WORKFLOW_FILE_NAME,
   WorkflowError,
   generateMigrationWorkflow,
   normalizeMicroserviceName,
-  pathExists,
   renderMigrationWorkflow,
   resolveWorkflowPath
 };

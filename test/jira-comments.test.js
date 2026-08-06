@@ -147,3 +147,42 @@ test('comment command loads the linked Jira issue from .env and publishes statio
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('comment command publishes CAB closure evidence for station 4', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'jira-comment-station4-'));
+  const posted = [];
+
+  try {
+    await writeFile(
+      path.join(directory, '.env'),
+      [
+        'JIRA_HOST=https://jira.example.com',
+        'JIRA_PROJECT_KEY=EVOLCRE4',
+        'JIRA_API_TOKEN=file-token',
+        'JIRA_ISSUE_KEY=EVOLCRE4-444',
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+
+    const result = await runCommentCommand('4', {
+      currentDirectory: directory,
+      environment: {},
+      output: () => {},
+      jiraClientFactory: () => ({
+        postJiraComment: async (issueKey, markdown) => {
+          posted.push({ issueKey, markdown });
+          return { id: '4', issueKey };
+        }
+      })
+    });
+
+    assert.equal(result.station, '4');
+    assert.equal(posted[0].issueKey, 'EVOLCRE4-444');
+    assert.match(posted[0].markdown, /Estación 4/);
+    assert.match(posted[0].markdown, /Resumen maestro/);
+    assert.match(posted[0].markdown, /Evidencia CAB/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

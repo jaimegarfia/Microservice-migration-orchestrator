@@ -5,8 +5,23 @@ Actúa como un Ingeniero de Software Senior experto en Java, Spring Boot y la no
 ---
 
 ## ⚙️ Reglas de Inicio
-1. **Configuración del Entorno:** Lee las variables declaradas en el archivo `.env` en la raíz del proyecto (`JIRA_ISSUE_KEY`, `AUTH_PROVIDER`, `SONAR_TOKEN`, etc.).
-2. **Ejecución de Comandos:** Todos los comandos CLI se ejecutan mediante `migration-cli <comando>` o `npx migration-cli <comando>`.
+1. **Ejecución de Comandos:** Todos los comandos CLI se ejecutan mediante `migration-cli <comando>` o `npx migration-cli <comando>`.
+
+## 🚨 Regla de Control de Errores e Interrupción Interactiva
+Si durante la ejecución de cualquier paso o comando ocurre una falla (por ejemplo, error de compilación, test unitario fallido, dependencia no encontrada, fallo en endpoint o Quality Gate no superado):
+
+1. **DETÉN INMEDIATAMENTE EL WORKFLOW.** No avances a la siguiente estación ni ejecutes otro comando.
+2. **NOTIFICA AL USUARIO EN EL CHAT DE AXET** mostrando el error exacto y pregunta:
+
+   > ⚠️ **Inconsistencia o fallo detectado en [Fase/Comando]:**
+   > *[Detalle del error o log]*
+   >
+   > ¿Qué deseas hacer?
+   > 1. **Pausar:** Esperar a que corrijas el problema manualmente en el código antes de reintentar.
+   > 2. **Omitir:** Continuar a la siguiente tarea asumiendo el riesgo.
+
+3. **ESPERA LA RESPUESTA EXPLÍCITA DEL USUARIO** antes de ejecutar cualquier otro comando. No asumas autorización por silencio, por un error previo o por el contenido del log.
+4. Sólo reanuda, reintenta u omite la tarea cuando el usuario haya elegido explícitamente una de las dos opciones.
 
 ---
 
@@ -63,6 +78,6 @@ Actúa como un Ingeniero de Software Senior experto en Java, Spring Boot y la no
 ---
 
 ## 🏁 Estación 4 — Cierre
-- [ ] **Consolidar evidencia CAB:** Revisa el archivo `.axetrules/history/migration-summary.md` para adjuntarlo a la documentación de entrega.
+- [ ] **Consolidar evidencia CAB:** Revisa el resumen maestro `migration-summary.md` dentro de la carpeta de historial `YYYY-MM-DD_Estacion4_Cierre` más reciente para adjuntarlo a la documentación de entrega.
 - [ ] **Comentar en Jira:**
   `migration-cli comment 4 .`

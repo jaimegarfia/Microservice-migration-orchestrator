@@ -118,8 +118,9 @@ test('writes a PRE baseline JSON artifact with the required schema', async () =>
 
     assert.match(
       reportPath,
-      /[\\/]\.axetrules[\\/]history[\\/]2026-07-24T10-00-00-000Z[\\/]endpoints-pre\.json$/
+      /[\\/]\.axetrules[\\/]history[\\/]\d{4}-\d{2}-\d{2}_Estacion0_PRE-Endpoints[\\/]endpoints-pre\.json$/
     );
+    assert.equal(savedReport.microservice, 'auth-service');
     assert.deepEqual(savedReport, report);
     assert.deepEqual(summarizeResults(report.results), {
       total: 1,

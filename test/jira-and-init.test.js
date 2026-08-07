@@ -1,23 +1,19 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { mkdtemp, readFile, rm } = require('node:fs/promises');
+const { access, mkdtemp, readFile, rm } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
 const { runInitCommand } = require('../src/commands/init');
-const { JiraClient, JiraRequestError } = require('../src/services/jira');
+const {
+  extractJiraIssueKey,
+  JiraConfigurationError
+} = require('../src/services/jira');
 const { STANDARD_SUBTASKS } = require('../src/utils/checklist');
 
-function jsonResponse(body, status = 201) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' }
-  });
-}
-
-test('init writes and returns the local checklist when Jira is not configured', async () => {
+test('init writes and returns the local checklist without Jira configuration', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'migration-cli-'));
   const output = [];
 
@@ -29,11 +25,6 @@ test('init writes and returns the local checklist when Jira is not configured', 
     });
 
     const savedChecklist = await readFile(result.historyPath, 'utf8');
-    const environmentTemplate = await readFile(
-      path.join(directory, '.env.example'),
-      'utf8'
-    );
-    const environmentFile = await readFile(path.join(directory, '.env'), 'utf8');
     const gitIgnore = await readFile(path.join(directory, '.gitignore'), 'utf8');
 
     assert.equal(result.mode, 'local');
@@ -42,10 +33,14 @@ test('init writes and returns the local checklist when Jira is not configured', 
     assert.match(gitIgnore, /\.axetrules\//);
     assert.match(gitIgnore, /\.axet\//);
     assert.match(gitIgnore, /micro-migration\.md/);
-    assert.equal(result.environmentFiles.created, true);
-    assert.equal(environmentFile, environmentTemplate);
-    assert.match(environmentTemplate, /JIRA_PROJECT_KEY=EVOLCRE4/);
-    assert.match(environmentTemplate, /AUTH_PROVIDER=ATLAS/);
+    await assert.rejects(
+      access(path.join(directory, '.env')),
+      { code: 'ENOENT' }
+    );
+    await assert.rejects(
+      access(path.join(directory, '.env.local')),
+      { code: 'ENOENT' }
+    );
     assert.match(result.historyPath, /jira-tasks-payments-service\.md$/);
     assert.equal(savedChecklist, result.checklist);
     assert.match(savedChecklist, /Migración Microservicio: payments service/);
@@ -59,51 +54,22 @@ test('init writes and returns the local checklist when Jira is not configured', 
   }
 });
 
-test('Jira client validates the configured project without creating issues', async () => {
-  const requests = [];
-  const client = new JiraClient({
-    host: 'https://jira.example.com/',
-    projectKey: 'MYPROJ',
-    authBasic: 'encoded-credentials',
-    fetchImplementation: async (url, options) => {
-      requests.push({ url, options });
-      return jsonResponse({ key: 'MYPROJ', name: 'Migration Project' }, 200);
-    }
-  });
-
-  const project = await client.validateConnection();
-
-  assert.deepEqual(project, { key: 'MYPROJ', name: 'Migration Project' });
-  assert.equal(requests.length, 1);
+test('extracts Jira issue references locally without making HTTP requests', () => {
+  assert.equal(extractJiraIssueKey('evolcre4-1234'), 'EVOLCRE4-1234');
   assert.equal(
-    requests[0].url,
-    'https://jira.example.com/rest/api/2/project/MYPROJ'
+    extractJiraIssueKey(
+      'https://jira.example.com/browse/EVOLCRE4-9876?focusedCommentId=42'
+    ),
+    'EVOLCRE4-9876'
   );
-  assert.equal(requests[0].options.method, undefined);
-  assert.equal(requests[0].options.headers.Authorization, 'Basic encoded-credentials');
-});
-
-test('Jira client exposes a useful error when project validation is rejected', async () => {
-  const client = new JiraClient({
-    host: 'https://jira.example.com',
-    projectKey: 'MYPROJ',
-    apiToken: 'token',
-    fetchImplementation: async () =>
-      jsonResponse(
-        {
-          errorMessages: ['Permission denied']
-        },
-        403
-      )
-  });
-
-  await assert.rejects(
-    () => client.validateConnection(),
-    (error) => {
-      assert.ok(error instanceof JiraRequestError);
-      assert.equal(error.status, 403);
-      assert.match(error.message, /Permission denied/);
-      return true;
-    }
+  assert.equal(
+    extractJiraIssueKey(
+      'https://jira.example.com/secure/ViewIssue.jspa?id=123&issue=CARRE_4-7'
+    ),
+    'CARRE_4-7'
+  );
+  assert.throws(
+    () => extractJiraIssueKey('https://jira.example.com/browse/not-an-issue'),
+    JiraConfigurationError
   );
 });

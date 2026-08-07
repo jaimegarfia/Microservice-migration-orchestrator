@@ -1,7 +1,9 @@
 'use strict';
 
 const path = require('node:path');
-const { access, readdir, readFile, writeFile } = require('node:fs/promises');
+const { access, readdir, mkdir, readFile, writeFile } = require('node:fs/promises');
+const { getHistoryDirectory } = require('../utils/history');
+const { toHistoryFileName } = require('../utils/checklist');
 
 class SummaryError extends Error {
   constructor(message, { cause } = {}) {
@@ -81,7 +83,8 @@ async function findLatestArtifact(artifactName, {
     try {
       const content = await fileSystem.readFile(artifactPath, 'utf8');
       if (!artifactName.endsWith('.json')) {
-        const belongsToMicroservice = !microserviceName ||
+        const belongsToMicroservice = artifactName !== 'parity-report.md' ||
+          !microserviceName ||
           content.includes(`# Reporte de Paridad API: ${microserviceName}`);
         if (belongsToMicroservice) {
           return { path: artifactPath, content, directory };
@@ -165,15 +168,10 @@ async function collectMigrationEvidence(microserviceName, {
       currentDirectory,
       fileSystem
     }),
-    readTextIfExists(
-      path.join(
-        currentDirectory,
-        '.axetrules',
-        'history',
-        `jira-tasks-${microserviceName}.md`
-      ),
-      { fileSystem }
-    ),
+    findLatestArtifact(toHistoryFileName(microserviceName), {
+      currentDirectory,
+      fileSystem
+    }),
     exists(path.join(microservicePath, 'README.md'), { fileSystem }),
     findVersionFiles(microservicePath, { fileSystem })
   ]);
@@ -190,7 +188,7 @@ async function collectMigrationEvidence(microserviceName, {
     evidenceDirectory,
     timestamp: path.basename(evidenceDirectory),
     station0: {
-      localChecklist: Boolean(localChecklist),
+      localChecklist: Boolean(localChecklist?.content),
       jira: false
     },
     station1: {
@@ -342,11 +340,30 @@ function statusBadge(status) {
 }
 
 async function writeMigrationSummary(content, evidenceDirectory, {
-  fileSystem = { writeFile }
+  currentDirectory = inferProjectDirectory(evidenceDirectory),
+  timestamp = new Date(),
+  fileSystem = { mkdir, writeFile }
 } = {}) {
-  const reportPath = path.join(evidenceDirectory, 'migration-summary.md');
+  const historyDirectory = getHistoryDirectory(
+    currentDirectory,
+    3,
+    'Resumen-Maestro',
+    timestamp
+  );
+  const reportPath = path.join(historyDirectory, 'migration-summary.md');
+
+  await fileSystem.mkdir(historyDirectory, { recursive: true });
   await fileSystem.writeFile(reportPath, content, 'utf8');
   return reportPath;
+}
+
+function inferProjectDirectory(evidenceDirectory) {
+  const historyMarker = `${path.sep}.axetrules${path.sep}history`;
+  const markerIndex = evidenceDirectory.lastIndexOf(historyMarker);
+
+  return markerIndex >= 0
+    ? evidenceDirectory.slice(0, markerIndex)
+    : path.resolve(evidenceDirectory);
 }
 
 module.exports = {

@@ -1,5 +1,5 @@
 {
-  "name": "microservice-migration-orchestrator",
+  "name": "microservice-migration-orchestrator-cli",
   "version": "0.5.0",
   "description": "CLI to orchestrate end-to-end microservice migration workflows.",
   "license": "MIT",
@@ -8,6 +8,11 @@
   "bin": {
     "migration-cli": "bin/migration-cli.js"
   },
+  "files": [
+    "bin",
+    "src",
+    "rewriter-util"
+  ],
   "engines": {
     "node": ">=18"
   },

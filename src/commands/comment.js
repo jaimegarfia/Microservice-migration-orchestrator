@@ -1,70 +1,55 @@
 'use strict';
 
 const path = require('node:path');
-const { access, readFile, readdir } = require('node:fs/promises');
-const { JiraClient } = require('../services/jira');
+const { mkdir, readFile, readdir, writeFile } = require('node:fs/promises');
 const {
   collectMigrationEvidence,
   findLatestArtifact,
   SummaryError
 } = require('../services/summary');
+const { getHistoryDirectory } = require('../utils/history');
 
 const STATION_NUMBERS = new Set(['0', '1', '2', '3', '4']);
 
 async function runCommentCommand(stationNumber, {
   currentDirectory = process.cwd(),
-  environment = process.env,
   output = console.log,
-  jiraClientFactory = JiraClient.fromEnvironment,
-  fileSystem = { access, readFile, readdir }
+  fileSystem = { mkdir, readFile, readdir, writeFile }
 } = {}) {
   const station = validateStationNumber(stationNumber);
-  const configuredEnvironment = await loadProjectEnvironment(
-    currentDirectory,
-    environment,
-    fileSystem
-  );
-  const issueKey = configuredEnvironment.JIRA_ISSUE_KEY;
-
-  if (!issueKey) {
-    throw new Error(
-      'No se encontró JIRA_ISSUE_KEY. Ejecuta "migration-cli init <microservicio> --jira-issue <KEY o URL>" primero.'
-    );
-  }
-
   const commentMarkdown = await buildStationComment(station, {
     currentDirectory,
     fileSystem
   });
-  const jiraClient = jiraClientFactory(configuredEnvironment);
-  const comment = await jiraClient.postJiraComment(issueKey, commentMarkdown);
+  const commentPath = await writeManualComment(station, commentMarkdown, {
+    currentDirectory,
+    fileSystem
+  });
 
-  output(`Comentario de Estación ${station} publicado en Jira: ${comment.issueKey}`);
-  return { station, comment, commentMarkdown };
+  output('');
+  output(commentMarkdown);
+  output('');
+  output(`Comentario manual de Estación ${station} generado en: ${commentPath}`);
+  output('Copia el contenido y pégalo manualmente en la tarea corporativa de Jira.');
+
+  return { station, commentMarkdown, commentPath };
 }
 
 async function buildStationComment(station, {
   currentDirectory = process.cwd(),
-  fileSystem = { access, readFile, readdir }
+  fileSystem = { readFile, readdir }
 } = {}) {
-  const title = `## Evidencia de migración — Estación ${station}`;
-  const generatedAt = new Date().toISOString();
-
   if (station === '0') {
-    const pre = await findLatestArtifact('endpoints-pre.json', {
-      currentDirectory,
-      fileSystem
-    });
-    const checklist = await findLatestChecklist(currentDirectory, fileSystem);
-
     return [
-      title,
+      'ESTACIÓN 0 SUPERADA',
       '',
-      `- **Fecha UTC:** ${generatedAt}`,
-      `- Baseline PRE: ${pre ? `disponible (\`${pre.path}\`)` : 'no disponible'}.`,
-      `- Checklist local: ${checklist ? `disponible (\`${checklist}\`)` : 'no disponible'}.`,
+      'Rama migración: <URL_DE_LA_RAMA_BITBUCKET>',
       '',
-      'La estación 0 ha finalizado y sus artefactos quedan registrados en el repositorio.'
+      'Para obtener el token:',
+      '- Para ATLAS: curl.exe -k -X POST "https://security-dev.npapps.ocp.es.wcorp.carrefour.com/service-auth-server-v1/oauth/token?grant_type=client_credentials" -H "Authorization: Basic QVBMSUFQT0w6NFAwTDBDNFJSM0YwVVI="',
+      '- Para AGORA: Hacer login en la aplicación con ADMIN001:ADMIN001 y capturar el token Bearer desde la pestaña RED de las herramientas de desarrollador del navegador.',
+      '',
+      '[Adjuntar capturas de pantalla de los endpoints PRE]'
     ].join('\n');
   }
 
@@ -104,13 +89,34 @@ async function buildStationComment(station, {
         ];
 
   return [
-    title,
+    `ESTACIÓN ${station} SUPERADA`,
     '',
-    `- **Fecha UTC:** ${generatedAt}`,
     ...details,
     '',
-    `La estación ${station} ha finalizado y la evidencia queda registrada en el repositorio.`
+    `[Adjuntar las evidencias de la Estación ${station}]`
   ].join('\n');
+}
+
+async function writeManualComment(station, commentMarkdown, {
+  currentDirectory = process.cwd(),
+  fileSystem = { mkdir, writeFile }
+} = {}) {
+  const timestamp = new Date();
+  const historyDirectory = getHistoryDirectory(
+    currentDirectory,
+    station,
+    `Jira-Comentario-${station}`,
+    timestamp
+  );
+  const commentPath = path.join(
+    historyDirectory,
+    `jira-comment-station-${station}.md`
+  );
+
+  await fileSystem.mkdir(historyDirectory, { recursive: true });
+  await fileSystem.writeFile(commentPath, `${commentMarkdown}\n`, 'utf8');
+
+  return commentPath;
 }
 
 function validateStationNumber(stationNumber) {
@@ -119,38 +125,6 @@ function validateStationNumber(stationNumber) {
     throw new Error('La estación debe ser 0, 1, 2, 3 o 4.');
   }
   return station;
-}
-
-async function loadProjectEnvironment(currentDirectory, environment, fileSystem) {
-  const envPath = path.join(currentDirectory, '.env');
-  let fileEnvironment = {};
-
-  try {
-    fileEnvironment = parseEnvironmentFile(
-      await fileSystem.readFile(envPath, 'utf8')
-    );
-  } catch (error) {
-    if (error.code !== 'ENOENT') {
-      throw new Error(`No se pudo leer ${envPath}.`, { cause: error });
-    }
-  }
-
-  return { ...fileEnvironment, ...environment };
-}
-
-function parseEnvironmentFile(content) {
-  return Object.fromEntries(
-    String(content)
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith('#'))
-      .map((line) => {
-        const separator = line.indexOf('=');
-        return separator === -1
-          ? [line, '']
-          : [line.slice(0, separator).trim(), line.slice(separator + 1).trim()];
-      })
-  );
 }
 
 async function findLatestChecklist(currentDirectory, fileSystem) {
@@ -188,8 +162,10 @@ function formatSonarGate(gate) {
 module.exports = {
   STATION_NUMBERS,
   buildStationComment,
-  loadProjectEnvironment,
-  parseEnvironmentFile,
+  findLatestChecklist,
+  formatQualityGate,
+  formatSonarGate,
   runCommentCommand,
-  validateStationNumber
+  validateStationNumber,
+  writeManualComment
 };

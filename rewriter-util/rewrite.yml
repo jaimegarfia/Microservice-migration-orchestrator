@@ -1,0 +1,483 @@
+type: specs.openrewrite.org/v1beta/recipe
+name: upgrade.zordon.carre4
+displayName: Upgrade zordon carre4
+description: Upgrade zordon carre4
+recipeList:
+  - org.openrewrite.java.dependencies.UpgradeDependencyVersion:
+      artifactId: spring-data-solr
+      groupId: org.springframework.data
+      newVersion: 4.3.15
+      configuration: implementation
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: "com.carrefour.architecture.exceptions.FunctionalException"
+      newFullyQualifiedTypeName: "com.carrefour.architecture.commons.exceptions.TechnicalException"
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: "com.carrefour.architecture.exceptions.model.BusinessValidationError"
+      newFullyQualifiedTypeName: "com.carrefour.architecture.commons.exceptions.model.BusinessValidationError"
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: "com.carrefour.architecture.exceptions.model.ErrorItem"
+      newFullyQualifiedTypeName: "com.carrefour.architecture.commons.exceptions.model.ErrorItem"
+  - org.openrewrite.gradle.plugins.ChangePluginVersion:
+      pluginIdPattern: org.sonarqube
+      newVersion: 3.3
+  - org.openrewrite.gradle.plugins.ChangePluginVersion:
+      pluginIdPattern: org.springframework.boot
+      newVersion: 2.7.18
+  - org.openrewrite.gradle.plugins.RemoveBuildPlugin:
+      pluginId: maven
+  - org.openrewrite.gradle.plugins.AddBuildPlugin:
+      pluginId: jacoco
+  - org.openrewrite.gradle.plugins.AddBuildPlugin:
+      pluginId: com.benjaminsproule.swagger
+      version: 1.0.5
+  - org.openrewrite.gradle.plugins.AddBuildPlugin:
+      pluginId: org.springdoc.openapi-gradle-plugin
+      version: 1.6.0
+  - org.openrewrite.gradle.AddDependency:
+      groupId: 'com.carrefour.architecture'
+      artifactId: 'ms-commons-security-springboot'
+      version: 1.0.7
+      configuration: implementation
+  - org.openrewrite.gradle.AddDependency:
+      groupId: 'com.carrefour.architecture'
+      artifactId: 'ms-commons-kudu-springboot'
+      version: 1.0.5
+      configuration: implementation
+  - org.openrewrite.gradle.AddDependency:
+      groupId: 'com.carrefour.architecture'
+      artifactId: 'ms-commons-kerberos-springboot'
+      version: 1.0.2
+      configuration: implementation
+  - org.openrewrite.gradle.AddDependency:
+      groupId: 'org.springdoc'
+      artifactId: 'springdoc-openapi-ui'
+      version: 1.6.15
+      configuration: implementation
+  - org.openrewrite.gradle.AddDependency:
+      groupId: 'org.projectlombok'
+      artifactId: 'lombok'
+      configuration: compileOnly
+      version: 1.18.30
+  - org.openrewrite.gradle.AddDependency:
+      groupId: org.projectlombok
+      artifactId: lombok
+      configuration: annotationProcessor
+      version: 1.18.30
+  - org.openrewrite.gradle.AddDependency:
+      groupId: 'org.mapstruct'
+      artifactId: 'mapstruct'
+      configuration: implementation
+      version: 1.5.3.Final
+  - org.openrewrite.gradle.AddDependency:
+      groupId: 'org.mapstruct'
+      artifactId: 'mapstruct-processor'
+      configuration: annotationProcessor
+      version: 1.5.3.Final
+  - org.openrewrite.java.dependencies.AddDependency:
+      groupId: org.springdoc
+      artifactId: springdoc-openapi-ui
+      version: 1.6.15
+      configuration: implementation
+  - org.openrewrite.java.dependencies.AddDependency:
+      groupId: org.apache.commons
+      artifactId: commons-collections4
+      version: 4.4
+      configuration: implementation
+  - org.openrewrite.java.dependencies.AddDependency:
+      groupId: com.carrefour.architecture
+      artifactId: ms-commons-remote-springboot
+      version: 1.0.3
+      configuration: implementation
+  - org.openrewrite.java.dependencies.AddDependency:
+      artifactId: carrefour-swagger-ui
+      groupId: com.carrefour.architecture
+      version: 2.0.0
+      configuration: implementation
+  - org.openrewrite.gradle.RemoveDependency:
+      groupId: 'com.carrefour.architecture'
+      artifactId: 'arq-microservices-security'
+  - org.openrewrite.gradle.RemoveDependency:
+      groupId: 'com.carrefour.architecture'
+      artifactId: 'carrefour-commons-architecture'
+  - org.openrewrite.gradle.RemoveDependency:
+      groupId: 'org.springframework.cloud'
+      artifactId: 'spring-cloud-starter-hystrix'
+  - org.openrewrite.gradle.RemoveDependency:
+      groupId: 'io.micrometer'
+      artifactId: 'micrometer-spring-legacy'
+  - org.openrewrite.gradle.MigrateToGradle6
+  - org.openrewrite.gradle.UpdateGradleWrapper:
+      version: 7.3.3
+      addIfMissing: false
+  - org.openrewrite.java.migrate.UpgradeToJava17
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7
+  - org.openrewrite.text.FindAndReplace:
+      find: "dependencies {testRuntimeOnly"
+      replace: "dependencies { classpath"
+      filePattern: "**/build.gradle"
+  - org.openrewrite.text.FindAndReplace:
+      find: "task wrapper\\(type: Wrapper\\) \\{\\n    gradleVersion = \"3.5\"\\n\\}"
+      replace: ""
+      regex: true
+      filePattern: "**/build.gradle"
+  - org.openrewrite.text.FindAndReplace:
+      find: "testRuntimeOnly"
+      replace: "implementation"
+      filePattern: "**/build.gradle"
+  ## swagger
+  - org.openrewrite.java.springdoc.SwaggerToSpringDoc
+  - org.openrewrite.java.springdoc.ReplaceSpringFoxDependencies
+  - org.openrewrite.openapi.swagger.MigrateApiResponsesToApiResponses
+  - org.openrewrite.java.springdoc.MigrateSpringdocCommon
+  ### carrefour
+  - org.openrewrite.text.FindAndReplace:
+      find: "HttpServletResponse.SC_OK"
+      replace: "\"200\""
+      filePattern: "**/java.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "HttpServletResponse.SC_NOT_FOUND"
+      replace: "\"404\""
+      filePattern: "**/java.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "HttpServletResponse.SC_INTERNAL_SERVER_ERROR"
+      replace: "\"500\""
+      filePattern: "**/java.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "HttpServletResponse.SC_BAD_REQUEST"
+      replace: "\"400\""
+      filePattern: "**/java.java"
+  - org.openrewrite.gradle.RemoveDependency:
+      groupId: 'org.projectlombok'
+      artifactId: 'lombok-mapstruct-binding'
+  - org.openrewrite.text.FindAndReplace:
+      find: "@EnableAutoConfiguration(exclude = { DataSourceAutoConfiguration.class })"
+      replace: ""
+      regex: false
+      filePattern: "**/Application.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "@Scope(scopeName = \"token\")"
+      replace: ""
+      regex: false
+      filePattern: "**/KuduConfig.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "@EnableSwagger2"
+      replace: ""
+      regex: false
+      filePattern: "**/Application.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "import com.carrefour.architecture.model.IMasterType;"
+      replace: ""
+      regex: false
+      filePattern: "**/*.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "implements IMasterType"
+      replace: ""
+      regex: false
+      filePattern: "**/*.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "import springfox.documentation.swagger2.annotations.EnableSwagger2"
+      replace: ""
+      regex: false
+      filePattern: "**/Application.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "io.spring.gradle:dependency-management-plugin:1.0.2.RELEASE"
+      replace: "io.spring.gradle:dependency-management-plugin:1.0.11.RELEASE"
+      regex: false
+      filePattern: "**/build.gradle"
+  - org.openrewrite.text.FindAndReplace:
+      find: "com.carrefour.architecture:carrefour-microservices-starter:1.5.9"
+      replace: "com.carrefour.architecture:carrefour-microservices-starter:3.1.5"
+      regex: false
+      filePattern: "**/build.gradle"
+  - org.openrewrite.text.FindAndReplace:
+      find: "apply from: \"gradle/jacoco.gradle\""
+      replace: ""
+      regex: false
+      filePattern: "**/build.gradle"
+  - org.openrewrite.text.FindAndReplace:
+      find: |
+        processResources {
+            filesMatching('application.yml') {
+                expand(project.properties)
+            }
+        }
+      replace: ""
+      filePattern: "**/build.gradle"
+  - org.openrewrite.text.FindAndReplace:
+      find: "import com.carrefour.architecture.configuration.JacksonConfiguration"
+      replace: "import com.carrefour.architecture.commons.exceptions.TechnicalException"
+      filePattern: "**/*.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "JacksonConfiguration jacksonConfiguration"
+      replace: ""
+      filePattern: "**/ExceptionConfiguration.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "@Autowired"
+      replace: ""
+      filePattern: "**/ExceptionConfiguration.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "throw new FunctionalException"
+      replace: "throw new TechnicalException"
+      filePattern: "**/*.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "Schema(notes"
+      replace: "Schema(description"
+      filePattern: "**/*.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "@ApiResponse(responseCode"
+      replace: "@ApiResponse(responseCode"
+      filePattern: "**/*.java"
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: "com.carrefour.architecture.exceptions.model.C4Error"
+      newFullyQualifiedTypeName: "com.carrefour.architecture.commons.exceptions.model.C4Error"
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: "org.apache.commons.collections.CollectionUtils"
+      newFullyQualifiedTypeName: "org.apache.commons.collections4.CollectionUtils"
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: "com.carrefour.architecture.exceptions.TechnicalException"
+      newFullyQualifiedTypeName: "com.carrefour.architecture.commons.exceptions.TechnicalException"
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: "com.carrefour.architecture.utils.ApplicationContextHolder"
+      newFullyQualifiedTypeName: "com.carrefour.architecture.commons.remote.utils.ApplicationContextHolder"
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: "com.carrefour.architecture.exceptions.MicroserviceException"
+      newFullyQualifiedTypeName: "com.carrefour.architecture.commons.exceptions.MicroserviceException"
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: "com.carrefour.architecture.exceptions.model.RestErrorMessage"
+      newFullyQualifiedTypeName: "com.carrefour.architecture.commons.exceptions.model.RestErrorMessage"
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: "com.carrefour.architecture.exceptions.model.C4GenericError"
+      newFullyQualifiedTypeName: "com.carrefour.architecture.commons.exceptions.model.C4GenericError"
+  - org.openrewrite.DeleteSourceFiles:
+      filePattern: '**/nexus.gradle'
+  - org.openrewrite.DeleteSourceFiles:
+      filePattern: '**/ScopeConfiguration.java'
+  - org.openrewrite.text.FindAndReplace:
+      find: "oraclejre8:2.0.5"
+      replace: "openjdk17:3.0.0"
+      filePattern: "**/Dockerfile*"
+  - org.openrewrite.text.FindAndReplace:
+      find: |
+        ## NEXUS PROPERTIES  ##
+        nexusUsername=$nexusUsername
+        nexusPassword=$nexusPassword
+        NexusReleasesUrl=$NexusReleasesUrl
+        NexusSnapshotUrl=$NexusSnapshotUrl
+      replace: ""
+      filePattern: "**/gradle.properties*"
+  - org.openrewrite.text.FindAndReplace:
+      find: "gradleVersion: 'gradle-4.8'"
+      replace: "gradleVersion: 'gradle-7.3.3', javaVersion: 'openjdk17.0.2'"
+      filePattern: "Jenkinsfile*"
+  - org.openrewrite.text.FindAndReplace:
+      find: "gradleVersion: 'gradle-3.3',"
+      replace: "gradleVersion: 'gradle-7.3.3',\n\tjavaVersion: 'openjdk17.0.2',"
+      filePattern: "Jenkinsfile*"
+  - org.openrewrite.text.FindAndReplace:
+      find: "^\\s*emailNotificationAlways.*"
+      regex: true
+      replace: ""
+      filePattern: "Jenkinsfile*"
+  - org.openrewrite.text.CreateTextFile:
+      relativeFileName: src/main/java/com/carrefour/common/constants/Constants.java
+      fileContents: |
+          package com.carrefour.architecture;
+    
+          public final class Constants {
+            public static final String ELEMENT_CREATED_MESSAGE = "Elemento creado";
+            public static final String OK_MESSAGE = "OK";
+            public static final String INTERNAL_SERVER_ERROR_MESSAGE = "Internal Server Error";
+            public static final String NETWORK_ERROR_MESSAGE = "Network connectivity is unavailable";
+            public static final String DATABASE_ERROR_MESSAGE = "Database error";
+            public static final String COMPONENT_UNAVAILABLE_ERROR_MESSAGE = "The component {0} is unavailable";
+            public static final String FORBIDDEN_ERROR_MESSAGE = "Forbidden";
+            public static final String UNAUTHORIZED_ERROR_MESSAGE = "Unauthorized";
+            public static final String INVALID_ATTRIBUTE_FORMAT_ERROR_MESSAGE = "The field {0} has an invalid format";
+            public static final String INVALID_PAGEABLE_PARAMETERS_ERROR_MESSAGE = "The pageable parameters (page and size) must be positive numbers";
+            public static final String INSUFFICIENT_SEARCH_PARAMETERS_ERROR_MESSAGE = "Insufficient search parameters";
+            public static final String ELEMENT_NOT_FOUND_ERROR_MESSAGE = "Element not found";
+            public static final String EXISTENT_ELEMENT_ERROR_MESSAGE = "Existing element";
+            public static final String INVALID_DATA_FORMAT_ERROR_MESSAGE = "The input data format is invalid";
+            public static final String UNPROCESSABLE_ENTITY_ERROR_MESSAGE = "The input data is not complete";
+            public static final String SECURITY_ERROR_MESSAGE = "Security error";
+            public static final String JSON_HAL_MEDIATYPE = "application/hal+json";
+            public static final String METHOD_NOT_ALLOWED = "Method {0} is not allowed for the requested endpoint";
+          
+            private Constants() {}
+          }
+  - org.openrewrite.text.CreateTextFile:
+      relativeFileName: zordon/sonar.gradle
+      fileContents: |
+        sonarqube {
+            properties {
+                property "sonar.host.url", "${sonarUrl}"
+                property "sonar.projectKey", (project.hasProperty("local")) ? "${projectKey}_preview" : "${projectKey}"
+                property "sonar.projectName", (project.hasProperty("local")) ? "${projectName} (preview)" : "${projectName}"
+                property "sonar.sourceEncoding", "UTF-8"
+                property "sonar.projectDescription", "${projectDescription}"
+                property "sonar.login", "${sonarUsername}"
+                property "sonar.password", "${sonarPassword}"
+                property "sonar.sources", "src/main/java"
+                property "sonar.tests", "src/test"
+                property "sonar.junit.reportsPath", "build/test-results/test"
+                property "sonar.jacoco.reportPaths", "build/jacoco"
+                property "sonar.cpd.java.minimumLines", "5"
+                property "sonar.issue.ignore.block", "b1"
+                property "sonar.issue.ignore.block.b1.beginBlockRegexp", "//STARTNotCheckedBySonar"
+                property "sonar.issue.ignore.block.b1.endBlockRegexp", "//ENDNotCheckedBySonar"
+            }
+        }
+  - org.openrewrite.text.FindAndReplace:
+      find: "X-B3-TraceId"
+      replace: "traceId"
+      filePattern: "**/logback-spring.xml*"
+  - org.openrewrite.text.FindAndReplace:
+      find: "X-B3-SpanId"
+      replace: "spanId"
+      filePattern: "**/logback-spring.xml*"
+  - org.openrewrite.text.FindAndReplace:
+      find: "import com.carrefour.architecture.utils.kerberos.Krb5ClientHelper;"
+      regex: true
+      replace: ""
+      filePattern: "**/KuduConfig.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "\\s*public Subject getSubject.*"
+      regex: true
+      replace: ""
+      filePattern: "**/KuduConfig.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "\\s*krb5ClientHelper.*"
+      regex: true
+      replace: ""
+      filePattern: "**/KuduConfig.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "\\s*return krb5ClientHelper.krb5KeytabLogin.*"
+      regex: true
+      replace: ""
+      filePattern: "**/KuduConfig.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "public KuduClient getClientFromSubject(Subject subject) throws PrivilegedActionException {"
+      regex: true
+      replace: ""
+      filePattern: "**/KuduConfig.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "return Subject.doAs(subject, (PrivilegedExceptionAction<KuduClient>) () -> new KuduClient.KuduClientBuilder(kuduProperties.getServers()).build());"
+      regex: true
+      replace: ""
+      filePattern: "**/KuduConfig.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "^\\s*return Subject.doAs(subject, (PrivilegedExceptionAction.*"
+      regex: true
+      replace: ""
+      filePattern: "**/KuduConfig.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "return new CloudSolrClient(zkHosts, \"/solr\");"
+      replace: "List<String> zkHostsList = new ArrayList<>(zkHosts);\n\treturn new CloudSolrClient.Builder(zkHostsList, Optional.of(\"/solr\")).build();"
+      filePattern: "**/SolrConfig.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "^\\s*integrationTestImplementation.*"
+      regex: true
+      replace: ""
+      filePattern: "**/build.gradle"
+  - org.openrewrite.text.FindAndReplace:
+      find: "^\\s*integrationTestCompileOnly.*"
+      regex: true
+      replace: ""
+      filePattern: "**/build.gradle"
+  - org.openrewrite.text.FindAndReplace:
+      find: "implementation \"uk.co.jemos.podam:podam:6.0.1.RELEASE\""
+      regex: true
+      replace: "testImplementation \"uk.co.jemos.podam:podam:6.0.1.RELEASE\""
+      filePattern: "**/build.gradle"
+  - org.openrewrite.text.FindAndReplace:
+      find: "implementation \"org.springframework.boot:spring-boot-starter-test\""
+      regex: true
+      replace: "testImplementation \"org.springframework.boot:spring-boot-starter-test\""
+      filePattern: "**/build.gradle"
+  - org.openrewrite.java.dependencies.UpgradeDependencyVersion:
+      groupId: com.google.code.gson
+      artifactId: gson
+      newVersion: 2.10.1
+  - org.openrewrite.java.dependencies.UpgradeDependencyVersion:
+      groupId: org.apache.thrift
+      artifactId: libthrift
+      newVersion: 0.9.0
+  - org.openrewrite.java.dependencies.UpgradeDependencyVersion:
+      artifactId: spring-boot-starter-data-solr
+      groupId: org.springframework.boot
+      newVersion: 2.4.13
+      configuration: implementation
+  - org.openrewrite.java.dependencies.UpgradeDependencyVersion:
+      artifactId: spring-boot-starter-jdbc
+      groupId: org.springframework.boot
+      newVersion: 2.4.13
+      configuration: implementation
+  - org.openrewrite.java.dependencies.UpgradeDependencyVersion:
+      artifactId: spring-data-solr
+      groupId: org.springframework.data
+      newVersion: 4.3.15
+      configuration: implementation
+  - org.openrewrite.text.FindAndReplace:
+      find: "annotationProcessor \"org.projectlombok:lombok-mapstruct-binding:0.2.0\""
+      regex: true
+      replace: "annotationProcessor 'org.projectlombok:lombok:1.18.30'"
+      filePattern: "**/build.gradle"
+  - org.openrewrite.text.FindAndReplace:
+      find: "solrQuery.addSort(new Sort"
+      replace: "solrQuery.addSort(Sort.by"
+      filePattern: "**/*.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "solrQuery.setOffset(limit * page);"
+      replace: "solrQuery.setOffset(((long) limit * page));"
+      filePattern: "**/*.java"
+  - org.openrewrite.text.FindAndReplace:
+      find: "^\\s*import springfox.documentation.*"
+      regex: true
+      replace: ""
+      filePattern: "**/*.java"
+  - org.openrewrite.text.CreateTextFile:
+      relativeFileName: zordon/swaggerConfig
+      fileContents: |
+        import io.swagger.v3.oas.models.Components;
+        import io.swagger.v3.oas.models.OpenAPI;
+        import io.swagger.v3.oas.models.info.Info;
+        import io.swagger.v3.oas.models.security.SecurityScheme;
+        import io.swagger.v3.oas.models.servers.Server;
+        import org.springdoc.core.GroupedOpenApi;
+        import org.springframework.beans.factory.annotation.Value;
+        import org.springframework.context.annotation.Bean;
+        import org.springframework.context.annotation.Configuration;
+        
+        @Value("${server.context-path:/}")
+          private String contextPath;
+        
+          // Aquí definimos el Bean para OpenAPI 3.0
+          @Bean
+          public OpenAPI customOpenAPI() {
+          return new OpenAPI()
+            .info(new Info()
+            .title(API_TITLE)
+            .description(API_DESCRIPTION)
+            .version(API_VERSION))
+            .addServersItem(new Server().url(contextPath))
+            .components(new Components()
+            .addSecuritySchemes("Api Key",
+            new SecurityScheme()
+            .type(SecurityScheme.Type.APIKEY)
+            .name("X-API-KEY")
+            .in(SecurityScheme.In.HEADER)));
+        }
+        
+          @Bean
+          public GroupedOpenApi customGroupedApi() {
+          return GroupedOpenApi.builder()
+            .group(GROUP_NAME)
+            .pathsToMatch("/api/**")
+            .packagesToScan(REQUEST_HANDLERS_SELECTORS_BASE_PACKAGE)
+            .build();
+        }
+
+
+
+
+

@@ -1,7 +1,8 @@
 'use strict';
 
 const path = require('node:path');
-const { readdir, readFile, writeFile } = require('node:fs/promises');
+const { readdir, readFile, mkdir, writeFile } = require('node:fs/promises');
+const { getHistoryDirectory } = require('../utils/history');
 
 const PARITY_STATUS = {
   MATCH: 'MATCH',
@@ -237,17 +238,17 @@ function parityBadge(status) {
 
 async function writeParityReport(report, {
   currentDirectory = process.cwd(),
-  fileSystem = { writeFile }
+  fileSystem = { mkdir, writeFile }
 } = {}) {
-  const directoryName = report.timestamp.replace(/[:.]/g, '-');
-  const reportPath = path.join(
+  const historyDirectory = getHistoryDirectory(
     currentDirectory,
-    '.axetrules',
-    'history',
-    directoryName,
-    'parity-report.md'
+    3,
+    'POST-Endpoints',
+    report.timestamp
   );
+  const reportPath = path.join(historyDirectory, 'parity-report.md');
 
+  await fileSystem.mkdir(historyDirectory, { recursive: true });
   await fileSystem.writeFile(reportPath, renderParityMarkdown(report), 'utf8');
   return reportPath;
 }

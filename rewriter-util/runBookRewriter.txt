@@ -1,0 +1,70 @@
+
+PREPARACION
+
+Sacar coleccion de postman del micro
+
+Cambiar entorno a java 1.8
+
+PREMIGRACION ver (http://bitbucket.es.wcorp.carrefour.com/projects/SOPDO/repos/sopdo-ubicaciones/commits/93c9a74e410e4942ffc61961b3eb4430ce6fa2be)
+Cambiamos a googleArtifactory.gradle
+
+	
+Si no tenemos los keytab del dominio descargar y dejar en un directorio accesible
+	Ver https://bitbucket.es.wcorp.carrefour.com/projects/VAULT/repos/bigdata-vault/browse/openshift
+
+	
+Creamos application.yml desde su live-infra/dev
+	Modificamos lo siguiente TODO ESPECIFICAR
+	
+Arrancamos en local y probar que accedemos a swagger y algun endpoint
+
+MIGRACION
+
+Copiamos rewriter.yml en raiz
+ 
+Y añadimos en rewriter build.gradle
+	Plugin
+	    id("org.openrewrite.rewrite") version("6.19.0")
+	Tarea
+		rewrite { 
+			activeRecipe("upgrade.zordon.carre4")    
+			setExportDatatables(false)
+		}
+	Libreria
+		rewrite("org.openrewrite.recipe:rewrite-spring:6.0.1")
+	Arranque con Orika
+		bootRun {
+			jvmArgs = ["--add-opens=java.base/java.lang=ALL-UNNAMED"]
+		}
+
+Lanzamos rewriteDryRun(Opt para comprobar que todo ok con rewriter)
+	./gradlew rewriteDryRun
+Lanzamos rewrite
+	./gradlew rewriteRun
+
+Cambiar entorno a java 17
+
+Ejecutamos tareas postRewriter ver directorio zordon creado tras rewrite
+
+	Borrar primeras lineas de build.gradle (Si no estan estas lineas basura, es posible que se haya cortado la generación a medias. En mi caso fue por una tilde)
+	Corregir Jacoco en build.gradle
+	Pasamos lombok al principio de los imports
+	Comentar tests que fallan (posteriormente corregirlos o borrarlos si ya no aplican)
+	Corregir KuduConfig
+	Sustituir sonar
+	Corregir swagger
+	Orika to MapStruct (Ver http://bitbucket.es.wcorp.carrefour.com/projects/SUPPLY-DOMAIN/repos/cantidad-implantacion-daas/commits/7ec5022945432c0aa669dbb8525dfe31f7ce9fc6#src/main/java/com/carrefour/cantidadimplantacion/components/mappers/ArticleMapper.java)
+		Revisar OrikaConfiguration.java borrado, cualquier comportamiento especial de orika esta definido en este fichero
+		
+	Borramos directorio zordon
+	Quitamos rewriter de build.gradle
+	Añadimos COMMON PROPERTIES en gradle.properties
+	Revisar version de java en Dockerfile a java 17
+		FROM eu.gcr.io/spain-it-sharedapps-gkepro/baseimages/openjdk17:3.0.0
+	Revisar si tiene la libreria de carrefour de logging y añadirla en caso de faltar
+		  implementation 'com.carrefour.architecture:ms-commons-logging-springboot:1.0.4'
+	Añadir task para la generacion de reporte jacoco
+		tasks.test {
+			useJUnitPlatform()
+			finalizedBy jacocoTestReport
+		}

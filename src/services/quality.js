@@ -4,6 +4,7 @@ const path = require('node:path');
 const { access, mkdir, readFile, writeFile } = require('node:fs/promises');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
+const { getHistoryDirectory } = require('../utils/history');
 
 const execFileAsync = promisify(execFile);
 const COVERAGE_THRESHOLD = 60;
@@ -427,14 +428,14 @@ async function writeStation2Evidence(evidence, {
   currentDirectory = process.cwd(),
   fileSystem = { mkdir, writeFile }
 } = {}) {
-  const timestampDirectory = evidence.timestamp.replace(/[:.]/g, '-');
-  const historyDirectory = path.join(
+  const historyDirectory = getHistoryDirectory(
     currentDirectory,
-    '.axetrules',
-    'history',
-    timestampDirectory
+    2,
+    'JacocoSonar',
+    evidence.timestamp
   );
   const evidencePath = path.join(historyDirectory, 'station2-quality.json');
+  const markdownPath = path.join(historyDirectory, 'station2-quality.md');
 
   await fileSystem.mkdir(historyDirectory, { recursive: true });
   await fileSystem.writeFile(
@@ -442,8 +443,48 @@ async function writeStation2Evidence(evidence, {
     `${JSON.stringify(evidence, null, 2)}\n`,
     'utf8'
   );
+  await fileSystem.writeFile(
+    markdownPath,
+    renderStation2Markdown(evidence),
+    'utf8'
+  );
 
   return evidencePath;
+}
+
+function renderStation2Markdown(evidence) {
+  const coverageGate = evidence.coverage?.qualityGate;
+  const sonarGate = evidence.sonar?.qualityGate;
+  const priorityRows = evidence.coverage?.priorities?.map((priority) =>
+    `| ${priority.name} | ${priority.lineCoverage}% | ${priority.complexity} | ${priority.roiScore} |`
+  ) || [];
+
+  return [
+    '# Evidencia de calidad — Estación 2',
+    '',
+    `- **Proyecto:** \`${evidence.projectDirectory}\``,
+    `- **Timestamp:** ${evidence.timestamp}`,
+    '',
+    '## JaCoCo',
+    '',
+    `- **Estado:** ${coverageGate ? (coverageGate.passed ? 'PASSED' : 'FAILED') : 'No ejecutado'}`,
+    `- **Cobertura de líneas:** ${coverageGate?.linePercentage ?? '-'}%`,
+    `- **Umbral:** ${coverageGate?.threshold ?? '-'}%`,
+    '',
+    '## SonarQube',
+    '',
+    `- **Estado:** ${sonarGate?.passed ? 'PASSED' : sonarGate?.status || 'No configurado'}`,
+    `- **Code Smells:** ${sonarGate?.checks?.find((check) => check.name === 'Code Smells')?.value ?? '-'}`,
+    `- **Bugs:** ${sonarGate?.checks?.find((check) => check.name === 'Bugs')?.value ?? '-'}`,
+    `- **Hotspots de seguridad:** ${sonarGate?.checks?.find((check) => check.name === 'Hotspots de seguridad')?.value ?? '-'}`,
+    '',
+    '## Prioridades de cobertura',
+    '',
+    '| Clase | Cobertura de líneas | Complejidad | ROI |',
+    '| --- | ---: | ---: | ---: |',
+    ...priorityRows,
+    ''
+  ].join('\n');
 }
 
 module.exports = {
@@ -462,5 +503,6 @@ module.exports = {
   rankCoveragePriorities,
   readSonarProjectKey,
   runCoverageBuild,
+  renderStation2Markdown,
   writeStation2Evidence
 };

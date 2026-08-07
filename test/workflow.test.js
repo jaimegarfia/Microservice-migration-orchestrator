@@ -36,8 +36,19 @@ test('generates a workflow under .axetrules/workflows and replaces every microse
     assert.match(workflow, /migration-cli coverage \./);
     assert.match(workflow, /migration-cli sonar \./);
     assert.match(workflow, /migration-cli summary catalog-service \./);
+    assert.match(workflow, /migration-cli comment 0 \./);
+    assert.match(workflow, /migration-cli comment 1 \./);
+    assert.match(workflow, /migration-cli comment 2 \./);
+    assert.match(workflow, /migration-cli comment 3 \./);
     assert.match(workflow, /migration-cli comment 4 \./);
-    assert.match(workflow, /\.axetrules\/history\/migration-summary\.md/);
+    assert.match(workflow, /Pausar/);
+    assert.match(workflow, /Omitir/);
+    assert.doesNotMatch(workflow, /\.env(?:\.local)?/);
+    assert.match(
+      workflow,
+      /migration-summary\.md.*YYYY-MM-DD_Estacion4_Cierre/
+    );
+    assert.doesNotMatch(workflow, /JIRA_USERNAME|JIRA_PASSWORD|JIRA_API_TOKEN/);
     assert.doesNotMatch(workflow, /\{\{MICROSERVICE_NAME\}\}/);
   } finally {
     await rm(directory, { recursive: true, force: true });

@@ -23,8 +23,6 @@ const { runMigrationSummary } = require('../src/commands/summary');
 const { runMigrationPipeline } = require('../src/commands/run');
 const { runWorkflowCommand } = require('../src/commands/workflow');
 const { runInteractiveWizard } = require('../src/commands/wizard');
-const { JiraRequestError } = require('../src/services/jira');
-
 const program = new Command();
 
 program
@@ -54,19 +52,18 @@ Consulta "migration-cli <comando> --help" para ver flags, ejemplos y variables d
 program
   .command('init [microserviceName]')
   .description(
-    'Estación 0: vincula una tarea Jira existente o genera el checklist local.'
+    'Estación 0: prepara la migración y genera el checklist local.'
   )
-  .option('--jira-issue <claveOUrl>', 'Clave o URL de la tarea Jira existente que se debe vincular.')
+  .option('--jira-issue <claveOUrl>', 'Dato opcional de referencia de la tarea corporativa.')
   .addHelpText('after', `
 Ejemplos:
   $ migration-cli init auth-service
   $ migration-cli init
 
-Variables de entorno Jira para publicar comentarios:
-  JIRA_HOST, JIRA_PROJECT_KEY y JIRA_AUTH_BASIC o JIRA_API_TOKEN.
-  JIRA_ISSUE_KEY puede declararse en .env o indicarse con --jira-issue.
+Variables de entorno Jira: no se requieren credenciales ni conexión remota.
+La opción --jira-issue sólo conserva una referencia local si se proporciona.
 
-Sin una incidencia vinculada se genera:
+Se genera:
   .axetrules/history/jira-tasks-<microservicio>.md
 `)
   .action(async (microserviceName, options) => {
@@ -82,15 +79,16 @@ Sin una incidencia vinculada se genera:
 
 program
   .command('comment <stationNumber> [microservicePath]')
-  .description('Publica la evidencia de una estación en la tarea Jira vinculada.')
+  .description('Genera evidencia local en texto para copiar manualmente en Jira.')
   .addHelpText('after', `
 Ejemplos:
   $ migration-cli comment 0 ./auth-service
   $ migration-cli comment 2 .
   $ migration-cli comment 4 .
 
-Acepta estaciones de 0 a 4. Lee JIRA_ISSUE_KEY desde .env o el entorno, genera un
-comentario Markdown con la evidencia disponible de la estación y lo publica en Jira.
+Acepta estaciones de 0 a 4. Genera el texto de la evidencia en consola y lo guarda
+en .axetrules/history/<timestamp>/jira-comment-station-<n>.md. No realiza llamadas
+HTTP ni necesita credenciales o configuración de Jira.
 `)
   .action(async (stationNumber, microservicePath) => {
     await runCommentCommand(stationNumber, {
@@ -233,18 +231,21 @@ Por defecto pom.xml y .mvn/ se conservan para permitir convivencia temporal.
 program
   .command('rewrite [microservicePath]')
   .description('Estación 1: ejecuta la receta OpenRewrite upgrade.zordon.carre4 en un proyecto Gradle.')
+  .option('--dry-run', 'Ejecuta rewriteDryRun sin aplicar cambios.')
   .addHelpText('after', `
 Ejemplos:
   $ migration-cli rewrite ./auth-service
+  $ migration-cli rewrite ./auth-service --dry-run
   $ migration-cli rewrite
 
-Crea rewriter.yml si no existe, inyecta temporalmente el plugin OpenRewrite 6.19.0,
-ejecuta gradlew rewriteRun y restaura la configuración temporal de build.
-Variable opcional: REWRITE_RECIPE_DEPENDENCY.
+Copia rewrite.yml desde rewriter-util, inyecta temporalmente el plugin OpenRewrite 6.19.0,
+ejecuta gradlew rewriteRun (o rewriteDryRun) y restaura la configuración temporal de build.
+La receta distribuida es org.openrewrite.recipe:rewrite-spring:6.0.1.
 `)
-  .action(async (microservicePath) => {
+  .action(async (microservicePath, options) => {
     await runRewriteCommand(microservicePath || process.cwd(), {
-      environment: process.env
+      environment: process.env,
+      dryRun: options.dryRun
     });
   });
 
@@ -328,8 +329,4 @@ async function runWizard() {
 
 function printError(error) {
   console.error(`Error: ${error.message}`);
-
-  if (error instanceof JiraRequestError && error.status) {
-    console.error(`Respuesta HTTP de Jira: ${error.status}`);
-  }
 }

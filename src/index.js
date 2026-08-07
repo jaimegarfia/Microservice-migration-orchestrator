@@ -50,7 +50,6 @@ const {
   resolveEndpointAuthToken
 } = require('./services/authentication');
 const {
-  DEFAULT_JIRA_HOST,
   DEFAULT_JIRA_PROJECT_KEY,
   ENVIRONMENT_TEMPLATE,
   ensureEnvironmentFiles,
@@ -115,9 +114,7 @@ const {
 } = require('./services/versioning');
 const {
   extractJiraIssueKey,
-  JiraClient,
-  JiraConfigurationError,
-  JiraRequestError
+  JiraConfigurationError
 } = require('./services/jira');
 const {
   STANDARD_SUBTASKS,
@@ -134,18 +131,15 @@ module.exports = {
   WorkflowError,
   RewriteError,
   SummaryError,
-  JiraClient,
   QualityAnalysisError,
   extractJiraIssueKey,
   VersioningError,
   JiraConfigurationError,
-  JiraRequestError,
   PARITY_STATUS,
   AUTH_PROVIDERS,
   BLOCK_END,
   BLOCK_START,
   DEFAULT_IGNORED_ENTRIES,
-  DEFAULT_JIRA_HOST,
   DEFAULT_JIRA_PROJECT_KEY,
   DEFAULT_RECIPE_DEPENDENCY,
   GRADLE_VERSION,

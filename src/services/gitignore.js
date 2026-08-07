@@ -14,7 +14,10 @@ const DEFAULT_IGNORED_ENTRIES = [
   '.axetrules/',
   '.axet/',
   'micro-migration.md',
+  '# OpenRewrite & Zordon Artifacts',
+  'rewrite.yml',
   'rewriter.yml',
+  'rewriter-util/',
   'zordon/'
 ];
 

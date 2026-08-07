@@ -78,10 +78,44 @@ test('injects and then restores the temporary OpenRewrite Gradle configuration',
 
     assert.match(temporaryBuild, /org\.openrewrite\.rewrite.*6\.19\.0/);
     assert.match(temporaryBuild, /activeRecipe\("upgrade\.zordon\.carre4"\)/);
-    assert.match(temporaryBuild, /rewrite\("org\.openrewrite\.recipe:rewrite-migrate-java:2\.31\.0"\)/);
+    assert.match(temporaryBuild, /rewrite\("org\.openrewrite\.recipe:rewrite-spring:6\.0\.1"\)/);
+    assert.match(temporaryBuild, /setExportDatatables\(false\)/);
     assert.equal(await readFile(buildPath, 'utf8'), originalBuild);
     assert.equal(result.rewriterCreated, true);
-    assert.match(await readFile(result.rewriterPath, 'utf8'), /upgrade\.zordon\.carre4/);
+    assert.equal(result.rewritePath, path.join(directory, 'rewrite.yml'));
+    assert.match(await readFile(result.rewritePath, 'utf8'), /Upgrade zordon carre4/);
+    assert.match(await readFile(path.join(directory, '.gitignore'), 'utf8'), /rewrite\.yml/);
+    assert.match(await readFile(path.join(directory, '.gitignore'), 'utf8'), /rewriter-util\//);
+    assert.match(await readFile(path.join(directory, '.gitignore'), 'utf8'), /zordon\//);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('uses rewriteDryRun when requested and still restores the build', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'migration-rewrite-dry-'));
+  const buildPath = path.join(directory, 'build.gradle');
+  const originalBuild = "plugins { id 'java' }\n";
+
+  try {
+    await writeFile(buildPath, originalBuild, 'utf8');
+    let executedTask;
+
+    const result = await runOpenRewrite(directory, {
+      platform: 'linux',
+      dryRun: true,
+      output: () => {},
+      execute: async (_command, argumentsList) => {
+        executedTask = argumentsList[0];
+        return { stdout: '', stderr: '' };
+      }
+    });
+
+    assert.equal(executedTask, 'rewriteDryRun');
+    assert.equal(result.command, './gradlew rewriteDryRun');
+    assert.equal(result.dryRun, true);
+    assert.equal(await readFile(buildPath, 'utf8'), originalBuild);
+    assert.match(await readFile(path.join(directory, 'rewrite.yml'), 'utf8'), /upgrade\.zordon\.carre4/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

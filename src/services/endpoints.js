@@ -9,6 +9,7 @@ const {
   writeFile
 } = require('node:fs/promises');
 const YAML = require('yaml');
+const { getHistoryDirectory } = require('../utils/history');
 
 const OPENAPI_FILE_NAMES = new Set([
   'swagger.json',
@@ -413,18 +414,20 @@ async function writeEndpointReport(report, {
   currentDirectory = process.cwd(),
   fileSystem = { mkdir, writeFile }
 } = {}) {
-  const directoryName = report.timestamp
-    .replace(/[:.]/g, '-')
-    .replace(/Z$/, 'Z');
-  const historyDirectory = path.join(
+  const isPost = report.phase === 'POST';
+  const historyDirectory = getHistoryDirectory(
     currentDirectory,
-    '.axetrules',
-    'history',
-    directoryName
+    isPost ? 3 : 0,
+    isPost ? 'POST-Endpoints' : 'PRE-Endpoints',
+    report.timestamp
   );
   const reportPath = path.join(
     historyDirectory,
-    report.phase === 'POST' ? 'endpoints-post.json' : 'endpoints-pre.json'
+    isPost ? 'endpoints-post.json' : 'endpoints-pre.json'
+  );
+  const markdownPath = path.join(
+    historyDirectory,
+    isPost ? 'endpoints-post.md' : 'endpoints-pre.md'
   );
 
   await fileSystem.mkdir(historyDirectory, { recursive: true });
@@ -433,8 +436,31 @@ async function writeEndpointReport(report, {
     `${JSON.stringify(report, null, 2)}\n`,
     'utf8'
   );
+  await fileSystem.writeFile(
+    markdownPath,
+    renderEndpointMarkdown(report),
+    'utf8'
+  );
 
   return reportPath;
+}
+
+function renderEndpointMarkdown(report) {
+  const rows = report.results.map((result) =>
+    `| \`${result.endpoint}\` | ${result.status ?? 'ERROR'} | ${result.responseTimeMs} ms | ${result.error || 'OK'} |`
+  );
+
+  return [
+    `# Endpoints ${report.phase} — ${report.microservice}`,
+    '',
+    `- **Timestamp:** ${report.timestamp}`,
+    `- **Total:** ${report.results.length}`,
+    '',
+    '| Endpoint | Status | Tiempo | Resultado |',
+    '| --- | ---: | ---: | --- |',
+    ...rows,
+    ''
+  ].join('\n');
 }
 
 function summarizeResults(results) {
@@ -461,6 +487,7 @@ module.exports = {
   loadEndpointDefinition,
   parseDefinition,
   summarizeResults,
+  renderEndpointMarkdown,
   writeBaselineReport,
   writeEndpointReport,
   writePostMigrationReport

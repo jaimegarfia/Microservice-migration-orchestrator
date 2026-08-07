@@ -4,17 +4,9 @@ const path = require('node:path');
 const { access, readFile, writeFile } = require('node:fs/promises');
 const { constants } = require('node:fs');
 
-const DEFAULT_JIRA_HOST = 'https://umane.emeal.nttdata.com/jiraito';
 const DEFAULT_JIRA_PROJECT_KEY = 'EVOLCRE4';
 
-const ENVIRONMENT_TEMPLATE = `# Jira Configuration (Default: EVOLCRE4)
-JIRA_HOST=${DEFAULT_JIRA_HOST}
-JIRA_PROJECT_KEY=${DEFAULT_JIRA_PROJECT_KEY}
-JIRA_ISSUE_KEY=
-JIRA_AUTH_BASIC=
-JIRA_API_TOKEN=
-
-# Authentication Providers for Endpoints (ATLAS / AGORA)
+const ENVIRONMENT_TEMPLATE = `# Authentication Providers for Endpoints (ATLAS / AGORA)
 # Opciones: ATLAS, AGORA, CUSTOM
 AUTH_PROVIDER=ATLAS
 ATLAS_CLIENT_ID=
@@ -102,7 +94,6 @@ async function exists(filePath, fileSystem) {
 }
 
 module.exports = {
-  DEFAULT_JIRA_HOST,
   DEFAULT_JIRA_PROJECT_KEY,
   ENVIRONMENT_TEMPLATE,
   ensureEnvironmentFiles,

@@ -123,8 +123,16 @@ test('analyzes a Spring project and generates a managed technical README', async
       recursive: true
     });
     await writeFile(
-      path.join(directory, 'pom.xml'),
-      '<project><artifactId>demo</artifactId><version>1.0.0</version><dependency>spring-boot-starter-web spring-data-jpa spring-kafka</dependency></project>'
+      path.join(directory, 'build.gradle'),
+      `plugins {
+  id 'org.springframework.boot' version '2.7.18'
+}
+dependencies {
+  implementation 'org.springframework.boot:spring-boot-starter-web'
+  implementation 'org.springframework.kafka:spring-kafka'
+  implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+}
+`
     );
     await writeFile(
       path.join(sourceDirectory, 'UserController.java'),
@@ -146,14 +154,23 @@ public class User {}`
     );
     await writeFile(
       path.join(directory, 'src', 'main', 'resources', 'application.yml'),
-      'spring:\n  datasource:\n    url: ${DATABASE_URL}\napp:\n  token: ${API_TOKEN:}\n'
+      'spring:\n  datasource:\n    url: ${DATABASE_URL}\napp:\n  token: ${API_TOKEN:}\nserver:\n  port: 9090\n  servlet:\n    context-path: /demo-api\n'
+    );
+    await writeFile(
+      path.join(directory, 'Dockerfile'),
+      'FROM eclipse-temurin:17-jre\n'
     );
     await writeFile(path.join(directory, 'README.md'), '# Manual title\n\nManual notes.\n');
 
     const analysis = await analyzeMicroservice(directory);
 
     assert.equal(analysis.stack.springBoot, true);
-    assert.equal(analysis.stack.buildTool, 'Maven');
+    assert.equal(analysis.stack.buildTool, 'Gradle');
+    assert.equal(analysis.port, '9090');
+    assert.equal(analysis.contextPath, '/demo-api');
+    assert.equal(analysis.dockerfile.present, true);
+    assert.equal(analysis.dockerfile.baseImage, 'eclipse-temurin:17-jre');
+    assert.ok(analysis.stack.integrations.includes('Kafka'));
     assert.equal(analysis.stack.database, 'JPA / Hibernate');
     assert.deepEqual(analysis.stack.messaging, ['Kafka']);
     assert.deepEqual(analysis.controllers[0].endpoints, [
@@ -168,9 +185,13 @@ public class User {}`
 
     assert.match(readme, /^# Manual title/m);
     assert.match(readme, /migration-cli:readme:start/);
-    assert.match(readme, /\| GET \| `\/api\/users\/\{id\}` \| UserController \|/);
-    assert.match(readme, /\| User \| users \|/);
-    assert.match(readme, /`DATABASE_URL`/);
+    assert.match(readme, /Java 17, Gradle 7 y Spring Boot 2/);
+    assert.match(readme, /server:\n  port: 9090/);
+    assert.match(readme, /context-path: \/demo-api/);
+    assert.match(readme, /- GET \/api\/users\/\{id\} \(UserController\)/);
+    assert.match(readme, /- POST \/api\/users \(UserController\)/);
+    assert.match(readme, /Kafka: Detectado/);
+    assert.match(readme, /User \(users\)/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
